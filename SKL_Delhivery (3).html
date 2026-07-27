@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>SK Logistics — Delhivery Booking</title>
+<style>
+  :root{
+    --navy:#0F2A3C;
+    --navy-light:#173C54;
+    --accent:#E8622C;
+    --accent-dark:#C94E1E;
+    --bg:#F3F5F6;
+    --card:#FFFFFF;
+    --line:#E1E6E9;
+    --text:#1B2A33;
+    --muted:#66757F;
+    --ok:#1E8E5A;
+    --err:#C0392B;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+  header{background:var(--navy);color:#fff;padding:16px 16px 44px;position:relative;}
+  header h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px;}
+  header p{margin:2px 0 0;font-size:12px;color:#B7C6D0;}
+  .gear{position:absolute;top:14px;right:14px;background:rgba(255,255,255,.12);border:none;color:#fff;width:38px;height:38px;border-radius:50%;font-size:17px;display:flex;align-items:center;justify-content:center;}
+  .tabs{display:flex;gap:6px;margin-top:16px;}
+  .tab{flex:1;text-align:center;padding:9px 0;border-radius:10px;font-size:13px;font-weight:600;color:#B7C6D0;background:rgba(255,255,255,.06);}
+  .tab.active{background:#fff;color:var(--navy);}
+  main{max-width:520px;margin:16px auto 90px;padding:0 12px;}
+  .card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:14px;box-shadow:0 2px 10px rgba(15,42,60,.06);}
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin:0 0 12px;}
+  .row{display:flex;gap:10px;}
+  .row > div{flex:1;}
+  label{display:block;font-size:12.5px;color:var(--muted);margin:10px 0 4px;font-weight:600;}
+  label:first-child{margin-top:0;}
+  input, select, textarea{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;
+    font-size:15px;background:#FBFCFC;color:var(--text);
+  }
+  input:focus, select:focus, textarea:focus{outline:none;border-color:var(--accent);background:#fff;}
+  textarea{resize:vertical;min-height:56px;}
+  .pay-toggle{display:flex;gap:8px;margin-top:2px;}
+  .pay-toggle button{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line);background:#FBFCFC;font-size:14px;font-weight:600;color:var(--muted);}
+  .pay-toggle button.sel{background:var(--navy);border-color:var(--navy);color:#fff;}
+  .advanced-toggle{font-size:13px;color:var(--accent-dark);font-weight:600;margin-top:12px;display:inline-block;}
+  .advanced{display:none;}
+  .advanced.open{display:block;}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:4px;}
+  .cta-bar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);padding:10px 14px;padding-bottom:calc(10px + env(safe-area-inset-bottom));}
+  .cta-bar .wrap{max-width:520px;margin:0 auto;}
+  button.primary{width:100%;background:var(--accent);color:#fff;border:none;padding:14px;border-radius:12px;font-size:15.5px;font-weight:700;}
+  button.primary:disabled{background:#CBB4A6;}
+  button.ghost{background:none;border:1px solid var(--line);color:var(--text);padding:10px 14px;border-radius:10px;font-size:13.5px;font-weight:600;}
+  .result{border-radius:12px;padding:14px;margin-bottom:14px;}
+  .result.ok{background:#EAF7EF;border:1px solid #BEE6CE;}
+  .result.err{background:#FBEAE8;border:1px solid #F1C2BB;}
+  .result .wb{font-size:20px;font-weight:800;letter-spacing:.5px;margin:4px 0;}
+  .actions{display:flex;gap:8px;margin-top:10px;}
+  .actions button{flex:1;}
+  .hist-item{border-bottom:1px solid var(--line);padding:12px 0;}
+  .hist-item:last-child{border-bottom:none;}
+  .hist-top{display:flex;justify-content:space-between;font-size:14px;font-weight:700;}
+  .hist-sub{font-size:12.5px;color:var(--muted);margin-top:2px;}
+  .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;}
+  .badge.ok{background:#EAF7EF;color:var(--ok);}
+  .badge.err{background:#FBEAE8;color:var(--err);}
+  .empty{text-align:center;color:var(--muted);font-size:13.5px;padding:30px 10px;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(15,42,60,.5);display:none;align-items:flex-end;z-index:50;}
+  .modal-overlay.show{display:flex;}
+  .modal{background:#fff;width:100%;max-height:88vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:18px 16px 26px;}
+  .modal h2{margin:0 0 4px;font-size:16px;}
+  .modal p.sub{font-size:12.5px;color:var(--muted);margin:0 0 14px;}
+  .modal-close{float:right;background:none;border:none;font-size:22px;color:var(--muted);line-height:1;}
+  .field-required::after{content:" *";color:var(--accent-dark);}
+  .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13.5px;z-index:60;opacity:0;transition:opacity .2s;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<header>
+  <button class="gear" onclick="openSettings()">&#9881;</button>
+  <h1>SK Logistics</h1>
+  <p>Delhivery Shipment Booking</p>
+  <div class="tabs">
+    <div class="tab active" id="tabNewBtn" onclick="showTab('new')">New Booking</div>
+    <div class="tab" id="tabHistBtn" onclick="showTab('hist')">History</div>
+  </div>
+</header>
+
+<main>
+
+  <!-- NEW BOOKING TAB -->
+  <div id="tabNew">
+
+    <div id="resultBox"></div>
+
+    <form id="bookingForm" onsubmit="return false;">
+
+      <div class="card">
+        <h2>Order</h2>
+        <label class="field-required">Order ID</label>
+        <input id="orderId" required>
+        <div class="hint">Auto-generated, edit if you want your own reference.</div>
+      </div>
+
+      <div class="card">
+        <h2>Consignee</h2>
+        <label class="field-required">Name</label>
+        <input id="consigneeName" required placeholder="Recipient full name">
+        <label class="field-required">Phone</label>
+        <input id="phone" required inputmode="numeric" maxlength="10" placeholder="10-digit mobile number">
+        <label class="field-required">Address</label>
+        <textarea id="address" required placeholder="House/street, area, landmark"></textarea>
+        <div class="row">
+          <div>
+            <label class="field-required">Pincode</label>
+            <input id="pincode" required inputmode="numeric" maxlength="6">
+          </div>
+          <div>
+            <label>City</label>
+            <input id="city" placeholder="Auto-fills from pincode">
+          </div>
+        </div>
+        <label>State</label>
+        <input id="state" placeholder="Auto-fills from pincode">
+        <div id="pincodeStatus" class="hint"></div>
+      </div>
+
+      <div class="card">
+        <h2>Payment</h2>
+        <div class="pay-toggle">
+          <button type="button" id="btnPrepaid" class="sel" onclick="setPayMode('Prepaid')">Prepaid</button>
+          <button type="button" id="btnCOD" onclick="setPayMode('COD')">COD</button>
+        </div>
+        <div id="codAmountWrap" style="display:none;">
+          <label class="field-required">COD Amount (₹)</label>
+          <input id="codAmount" inputmode="decimal">
+        </div>
+        <label class="field-required">Order / Invoice Value (₹)</label>
+        <input id="totalAmount" inputmode="decimal" placeholder="Declared shipment value">
+      </div>
+
+      <div class="card">
+        <h2>Package</h2>
+        <label>Contents Description</label>
+        <input id="productsDesc" placeholder="e.g. Documents, Garments, Electronics">
+        <div class="row">
+          <div>
+            <label>Quantity</label>
+            <input id="quantity" inputmode="numeric" value="1">
+          </div>
+          <div>
+            <label class="field-required">Weight (kg)</label>
+            <input id="weightKg" inputmode="decimal" placeholder="e.g. 0.5">
+          </div>
+          <div>
+            <label>Service</label>
+            <select id="serviceType">
+              <option value="Surface">Surface</option>
+              <option value="Express">Express</option>
+            </select>
+          </div>
+        </div>
+
+        <span class="advanced-toggle" onclick="toggleAdvanced()" id="advToggleLabel">+ Dimensions &amp; invoice details</span>
+        <div class="advanced" id="advancedSection">
+          <div class="row">
+            <div><label>Length (cm)</label><input id="shipLength" inputmode="numeric"></div>
+            <div><label>Width (cm)</label><input id="shipWidth" inputmode="numeric"></div>
+            <div><label>Height (cm)</label><input id="shipHeight" inputmode="numeric"></div>
+          </div>
+          <label>Seller Invoice Number</label>
+          <input id="sellerInvoice" placeholder="Optional">
+          <label>Seller Invoice Date</label>
+          <input id="sellerInvoiceDate" type="date">
+          <label>HSN Code</label>
+          <input id="hsnCode" placeholder="Defaults to Settings value">
+        </div>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- HISTORY TAB -->
+  <div id="tabHist" style="display:none;">
+    <div class="card">
+      <h2>Recent Bookings</h2>
+      <div id="historyList"><div class="empty">No bookings yet.</div></div>
+    </div>
+  </div>
+
+</main>
+
+<div class="cta-bar" id="ctaBar">
+  <div class="wrap">
+    <button class="primary" id="submitBtn" onclick="submitBooking()">Create Shipment</button>
+  </div>
+</div>
+
+<!-- SETTINGS MODAL -->
+<div class="modal-overlay" id="settingsOverlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeSettings()">&times;</button>
+    <h2>Settings</h2>
+    <p class="sub">These are saved on this device only. Your Delhivery API token is never stored here — it lives in your Apps Script backend.</p>
+
+    <label class="field-required">Apps Script Web App URL</label>
+    <input id="setAppsScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
+
+    <label>Pickup Location Name</label>
+    <input id="setPickupLocation" placeholder="Exact warehouse name registered with Delhivery">
+    <div class="hint">Must match your registered warehouse name exactly (case-sensitive).</div>
+
+    <label>Seller / Client Name</label>
+    <input id="setSellerName" placeholder="e.g. Sri Krishna Traders">
+
+    <label>Seller Address</label>
+    <textarea id="setSellerAddress" placeholder="Registered pickup/warehouse address"></textarea>
+
+    <label>Seller GST TIN</label>
+    <input id="setSellerGst" placeholder="GSTIN">
+
+    <label>Default HSN Code</label>
+    <input id="setHsnCode" placeholder="e.g. 4901 for documents">
+
+    <label>Order ID Prefix</label>
+    <input id="setOrderPrefix" placeholder="e.g. SKD">
+
+    <div class="actions" style="margin-top:16px;">
+      <button class="ghost" onclick="closeSettings()">Cancel</button>
+      <button class="primary" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script>
+const LS_SETTINGS = 'skl_delhivery_settings';
+const LS_HISTORY = 'skl_delhivery_history';
+let paymentMode = 'Prepaid';
+
+function getSettings(){
+  try { return JSON.parse(localStorage.getItem(LS_SETTINGS)) || {}; } catch(e){ return {}; }
+}
+function getHistory(){
+  try { return JSON.parse(localStorage.getItem(LS_HISTORY)) || []; } catch(e){ return []; }
+}
+function saveHistory(list){
+  localStorage.setItem(LS_HISTORY, JSON.stringify(list));
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+function showTab(tab){
+  document.getElementById('tabNew').style.display = tab==='new' ? 'block' : 'none';
+  document.getElementById('tabHist').style.display = tab==='hist' ? 'block' : 'none';
+  document.getElementById('tabNewBtn').classList.toggle('active', tab==='new');
+  document.getElementById('tabHistBtn').classList.toggle('active', tab==='hist');
+  document.getElementById('ctaBar').style.display = tab==='new' ? 'block' : 'none';
+  if(tab==='hist') renderHistory();
+}
+
+function setPayMode(mode){
+  paymentMode = mode;
+  document.getElementById('btnPrepaid').classList.toggle('sel', mode==='Prepaid');
+  document.getElementById('btnCOD').classList.toggle('sel', mode==='COD');
+  document.getElementById('codAmountWrap').style.display = mode==='COD' ? 'block' : 'none';
+}
+
+function toggleAdvanced(){
+  const el = document.getElementById('advancedSection');
+  const open = el.classList.toggle('open');
+  document.getElementById('advToggleLabel').textContent = open ? '- Dimensions & invoice details' : '+ Dimensions & invoice details';
+}
+
+function generateOrderId(){
+  const s = getSettings();
+  const prefix = s.orderPrefix || 'SKD';
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
+  const hist = getHistory();
+  const todayCount = hist.filter(h => h.orderId && h.orderId.startsWith(prefix+'-'+yy+mm+dd)).length + 1;
+  return `${prefix}-${yy}${mm}${dd}-${String(todayCount).padStart(2,'0')}`;
+}
+
+function openSettings(){
+  const s = getSettings();
+  document.getElementById('setAppsScriptUrl').value = s.appsScriptUrl || '';
+  document.getElementById('setPickupLocation').value = s.pickupLocation || '';
+  document.getElementById('setSellerName').value = s.sellerName || '';
+  document.getElementById('setSellerAddress').value = s.sellerAddress || '';
+  document.getElementById('setSellerGst').value = s.sellerGst || '';
+  document.getElementById('setHsnCode').value = s.hsnCode || '';
+  document.getElementById('setOrderPrefix').value = s.orderPrefix || 'SKD';
+  document.getElementById('settingsOverlay').classList.add('show');
+}
+function closeSettings(){
+  document.getElementById('settingsOverlay').classList.remove('show');
+}
+function saveSettings(){
+  const s = {
+    appsScriptUrl: document.getElementById('setAppsScriptUrl').value.trim(),
+    pickupLocation: document.getElementById('setPickupLocation').value.trim(),
+    sellerName: document.getElementById('setSellerName').value.trim(),
+    sellerAddress: document.getElementById('setSellerAddress').value.trim(),
+    sellerGst: document.getElementById('setSellerGst').value.trim(),
+    hsnCode: document.getElementById('setHsnCode').value.trim(),
+    orderPrefix: document.getElementById('setOrderPrefix').value.trim() || 'SKD'
+  };
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(s));
+  closeSettings();
+  showToast('Settings saved');
+  document.getElementById('orderId').value = generateOrderId();
+}
+
+function validateForm(){
+  const required = [
+    ['consigneeName','Consignee name'],
+    ['phone','Phone number'],
+    ['address','Address'],
+    ['pincode','Pincode'],
+    ['weightKg','Weight']
+  ];
+  for(const [id,label] of required){
+    if(!document.getElementById(id).value.trim()){
+      showToast(label + ' is required');
+      document.getElementById(id).focus();
+      return false;
+    }
+  }
+  if(document.getElementById('phone').value.trim().length !== 10){
+    showToast('Phone number should be 10 digits');
+    return false;
+  }
+  if(document.getElementById('pincode').value.trim().length !== 6){
+    showToast('Pincode should be 6 digits');
+    return false;
+  }
+  if(paymentMode === 'COD' && !document.getElementById('codAmount').value.trim()){
+    showToast('Enter COD amount');
+    return false;
+  }
+  const settings = getSettings();
+  if(!settings.appsScriptUrl){
+    showToast('Add your Apps Script URL in Settings first');
+    openSettings();
+    return false;
+  }
+  return true;
+}
+
+function buildPayload(){
+  const settings = getSettings();
+  const weightKg = parseFloat(document.getElementById('weightKg').value) || 0.5;
+  return {
+    action: 'create',
+    orderId: document.getElementById('orderId').value.trim(),
+    consigneeName: document.getElementById('consigneeName').value.trim(),
+    phone: document.getElementById('phone').value.trim(),
+    address: document.getElementById('address').value.trim(),
+    pincode: document.getElementById('pincode').value.trim(),
+    city: document.getElementById('city').value.trim(),
+    state: document.getElementById('state').value.trim(),
+    country: 'India',
+    paymentMode: paymentMode,
+    codAmount: document.getElementById('codAmount').value.trim(),
+    totalAmount: document.getElementById('totalAmount').value.trim(),
+    productsDesc: document.getElementById('productsDesc').value.trim(),
+    quantity: document.getElementById('quantity').value.trim() || '1',
+    weightGrams: Math.round(weightKg * 1000),
+    serviceType: document.getElementById('serviceType').value,
+    shipmentLength: document.getElementById('shipLength').value.trim(),
+    shipmentWidth: document.getElementById('shipWidth').value.trim(),
+    shipmentHeight: document.getElementById('shipHeight').value.trim(),
+    sellerInvoice: document.getElementById('sellerInvoice').value.trim(),
+    sellerInvoiceDate: document.getElementById('sellerInvoiceDate').value.trim(),
+    hsnCode: document.getElementById('hsnCode').value.trim() || settings.hsnCode || '',
+    pickupLocationName: settings.pickupLocation || '',
+    sellerName: settings.sellerName || '',
+    sellerAddress: settings.sellerAddress || '',
+    sellerGstTin: settings.sellerGst || ''
+  };
+}
+
+function jsonpRequest(action, dataObj){
+  return new Promise((resolve, reject) => {
+    const settings = getSettings();
+    if(!settings.appsScriptUrl){
+      reject(new Error('Apps Script URL not set'));
+      return;
+    }
+    const cbName = 'sklCb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+    const script = document.createElement('script');
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error('Request timed out — check your Apps Script URL and deployment access'));
+    }, 20000);
+
+    function cleanup(){
+      clearTimeout(timeoutId);
+      delete window[cbName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = function(result){
+      cleanup();
+      resolve(result);
+    };
+
+    script.onerror = function(){
+      cleanup();
+      reject(new Error('Could not reach Apps Script — check the URL and that the deployment access is set to "Anyone"'));
+    };
+
+    const url = settings.appsScriptUrl
+      + '?callback=' + encodeURIComponent(cbName)
+      + '&action=' + encodeURIComponent(action)
+      + '&data=' + encodeURIComponent(JSON.stringify(dataObj));
+    script.src = url;
+    document.body.appendChild(script);
+  });
+}
+
+async function submitBooking(){
+  if(!validateForm()) return;
+  const payload = buildPayload();
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Creating shipment…';
+
+  try{
+    const data = await jsonpRequest('create', payload);
+    handleResult(payload, data);
+  }catch(err){
+    handleResult(payload, { success:false, error: err.message });
+  }finally{
+    btn.disabled = false;
+    btn.textContent = 'Create Shipment';
+  }
+}
+
+function handleResult(payload, data){
+  const box = document.getElementById('resultBox');
+  const entry = {
+    orderId: payload.orderId,
+    consigneeName: payload.consigneeName,
+    address: payload.address,
+    phone: payload.phone,
+    city: payload.city,
+    state: payload.state,
+    pincode: payload.pincode,
+    paymentMode: payload.paymentMode,
+    totalAmount: payload.totalAmount,
+    codAmount: payload.codAmount,
+    weightKg: (payload.weightGrams / 1000).toString(),
+    quantity: payload.quantity,
+    serviceType: payload.serviceType || 'Surface',
+    waybill: data.waybill || '',
+    success: !!data.success,
+    remarks: (data.remarks || []).join('; ') || data.error || '',
+    timestamp: new Date().toISOString()
+  };
+  const hist = getHistory();
+  hist.unshift(entry);
+  saveHistory(hist);
+
+  if(data.success && data.waybill){
+    box.innerHTML = `
+      <div class="result ok">
+        <div>Shipment created for <strong>${escapeHtml(payload.consigneeName)}</strong></div>
+        <div class="wb">AWB: ${escapeHtml(data.waybill)}</div>
+        <div class="hint">Order ID: ${escapeHtml(payload.orderId)}</div>
+        <div class="actions">
+          <button class="ghost" onclick="printLabel('${escapeAttr(entry.orderId)}')">Print Label</button>
+          <button class="ghost" onclick="shareWhatsApp('${escapeAttr(entry.orderId)}')">Share</button>
+        </div>
+        <div class="actions">
+          <button class="ghost" onclick="startNewBooking()">New Booking</button>
+        </div>
+      </div>`;
+    showToast('Shipment created');
+  } else {
+    box.innerHTML = `
+      <div class="result err">
+        <div><strong>Booking failed</strong></div>
+        <div class="hint">${escapeHtml(entry.remarks || 'Check your Apps Script URL and Delhivery credentials.')}</div>
+        <div class="actions">
+          <button class="ghost" onclick="submitBooking()">Retry</button>
+        </div>
+      </div>`;
+    showToast('Booking failed — see details above');
+  }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function startNewBooking(){
+  document.getElementById('resultBox').innerHTML = '';
+  document.getElementById('bookingForm').reset();
+  setPayMode('Prepaid');
+  document.getElementById('orderId').value = generateOrderId();
+}
+
+function renderHistory(){
+  const hist = getHistory();
+  const list = document.getElementById('historyList');
+  if(!hist.length){
+    list.innerHTML = '<div class="empty">No bookings yet.</div>';
+    return;
+  }
+  list.innerHTML = hist.map(h => `
+    <div class="hist-item">
+      <div class="hist-top">
+        <span>${escapeHtml(h.consigneeName)}</span>
+        <span class="badge ${h.success ? 'ok' : 'err'}">${h.success ? 'Created' : 'Failed'}</span>
+      </div>
+      <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
+      <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="printLabel('${escapeAttr(h.orderId)}')">Print Label</button><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+    </div>
+  `).join('');
+}
+
+function shareWhatsApp(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry) return;
+  const msg = `*SK Logistics — Shipment Booked*%0A` +
+    `Consignee: ${encodeURIComponent(entry.consigneeName)}%0A` +
+    `Order ID: ${encodeURIComponent(entry.orderId)}%0A` +
+    `AWB / Tracking No: ${encodeURIComponent(entry.waybill)}%0A` +
+    `Track at: delhivery.com/tracking`;
+  window.open(`https://wa.me/?text=${msg}`, '_blank');
+}
+
+function escapeHtml(str){
+  if(str===undefined || str===null) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function escapeAttr(str){
+  return String(str).replace(/'/g, "\\'");
+}
+
+async function checkPincodeUI(pin){
+  const statusEl = document.getElementById('pincodeStatus');
+  const settings = getSettings();
+  if(!settings.appsScriptUrl){
+    statusEl.textContent = '';
+    return;
+  }
+  statusEl.textContent = 'Checking pincode…';
+  try{
+    const data = await jsonpRequest('pincode', { pincode: pin });
+    if(data.success){
+      if(!document.getElementById('city').value.trim()) document.getElementById('city').value = data.city || '';
+      if(!document.getElementById('state').value.trim()) document.getElementById('state').value = data.state || '';
+      const bits = [];
+      if(data.prepaid) bits.push('Prepaid ✓');
+      if(data.cod) bits.push('COD ✓');
+      if(data.isOda) bits.push('ODA area');
+      statusEl.textContent = 'Serviceable — ' + (bits.join(', ') || 'no service flags returned');
+      statusEl.style.color = 'var(--ok)';
+    } else {
+      statusEl.textContent = data.error || 'Not serviceable by Delhivery';
+      statusEl.style.color = 'var(--err)';
+    }
+  }catch(err){
+    statusEl.textContent = '';
+  }
+}
+
+// ---- Label printing (100mm x 75mm) ----
+function printLabel(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  const settings = getSettings();
+  const win = window.open('', '_blank');
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Label ${escapeHtml(entry.orderId)}</title>
+<style>
+  @page{ size:100mm 75mm; margin:0; }
+  *{box-sizing:border-box;}
+  body{margin:0;width:100mm;height:75mm;font-family:Georgia,'Times New Roman',serif;color:#000;}
+  .label{width:100mm;height:75mm;border:1.4px solid #000;display:flex;flex-direction:column;overflow:hidden;}
+
+  .logos{display:flex;border-bottom:1.4px solid #000;height:12mm;}
+  .logos .box{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .logos .box:first-child{border-right:1.4px solid #000;}
+  .logo-sk{font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:15px;font-style:italic;}
+  .logo-sk .sk{color:#C0392B;}
+  .logo-sk .rest{color:#1B4B66;}
+  .logo-dl{font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:15px;letter-spacing:.5px;color:#2E3A46;}
+
+  .barcode-block{border-bottom:1.4px solid #000;padding:2mm 0 1.5mm;text-align:center;}
+  .barcode-block svg{max-width:94mm;}
+  .awb-text{font-size:13px;font-weight:700;letter-spacing:1.5px;margin-top:0.5mm;}
+
+  .pincode-row{display:flex;border-bottom:1.4px solid #000;height:11mm;}
+  .pincode-row .pin{flex:1;display:flex;align-items:center;padding-left:2.5mm;font-size:22px;font-weight:700;}
+  .pincode-row .svc{width:26mm;border-left:1.4px solid #000;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-align:center;}
+
+  .body-row{display:flex;flex:1;}
+  .addr{flex:1;padding:2mm 2.5mm;font-size:11px;line-height:1.42;}
+  .addr .hdr{font-weight:700;font-size:11px;}
+  .addr .name{font-weight:700;font-size:14px;margin:0.5mm 0 1mm;}
+  .addr .pinline{font-weight:700;margin-top:1mm;}
+  .side{width:24mm;border-left:1.4px solid #000;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:13px;line-height:1.5;}
+  .side .amt{font-size:15px;margin-top:2mm;}
+</style></head>
+<body>
+  <div class="label">
+
+    <div class="logos">
+      <div class="box"><span class="logo-sk"><span class="sk">SK</span><span class="rest"> LOGISTICS</span></span></div>
+      <div class="box"><span class="logo-dl">DELHIVERY</span></div>
+    </div>
+
+    <div class="barcode-block">
+      <svg id="barcode"></svg>
+      <div class="awb-text">${escapeHtml(entry.waybill)}</div>
+    </div>
+
+    <div class="pincode-row">
+      <div class="pin">${escapeHtml(entry.pincode || '')}</div>
+      <div class="svc">${escapeHtml(entry.serviceType || 'Surface')}</div>
+    </div>
+
+    <div class="body-row">
+      <div class="addr">
+        <div class="hdr">Ship To:</div>
+        <div class="name">${escapeHtml(entry.consigneeName)}</div>
+        <div>${escapeHtml(entry.address || '')}</div>
+        <div>${escapeHtml(entry.city || '')}${entry.city ? ', ' : ''}${escapeHtml(entry.state || '')}</div>
+        <div>Ph: ${escapeHtml(entry.phone || '')}</div>
+        <div class="pinline">PIN: ${escapeHtml(entry.pincode || '')}</div>
+      </div>
+      <div class="side">
+        <div>${escapeHtml(entry.paymentMode)}</div>
+        <div>${escapeHtml(entry.serviceType || 'Surface')}</div>
+        ${entry.paymentMode === 'COD' ? `<div class="amt">₹${escapeHtml(entry.codAmount || '')}</div>` : ''}
+      </div>
+    </div>
+
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
+<script>
+  JsBarcode("#barcode", "${entry.waybill}", {
+    format: "CODE128",
+    width: 1.7,
+    height: 32,
+    displayValue: false,
+    margin: 0
+  });
+  window.onload = function(){ setTimeout(function(){ window.print(); }, 250); };
+<\/script>
+</body></html>`;
+  win.document.write(html);
+  win.document.close();
+}
+
+// Init
+document.getElementById('orderId').value = generateOrderId();
+document.getElementById('pincode').addEventListener('input', function(){
+  this.value = this.value.replace(/\D/g,'').slice(0,6);
+  document.getElementById('pincodeStatus').textContent = '';
+  if(this.value.length === 6) checkPincodeUI(this.value);
+});
+document.getElementById('phone').addEventListener('input', function(){
+  this.value = this.value.replace(/\D/g,'').slice(0,10);
+});
+if(!getSettings().appsScriptUrl){
+  setTimeout(()=>{ showToast('Set up your Apps Script URL in Settings'); }, 600);
+}
+</script>
+
+</body>
+</html>
