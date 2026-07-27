@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SKL Delhivery">
+<meta name="theme-color" content="#0F2A3C">
 <title>SK Logistics — Delhivery Booking</title>
 <style>
   :root{
@@ -76,9 +81,30 @@
   .field-required::after{content:" *";color:var(--accent-dark);}
   .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13.5px;z-index:60;opacity:0;transition:opacity .2s;}
   .toast.show{opacity:1;}
+
+  .lock-overlay{position:fixed;inset:0;background:var(--navy);z-index:200;display:flex;align-items:center;justify-content:center;}
+  .lock-card{width:100%;max-width:300px;text-align:center;padding:0 24px;}
+  .lock-icon{font-size:38px;margin-bottom:6px;}
+  .lock-card h2{color:#fff;font-size:19px;margin:0 0 2px;}
+  .lock-card p{color:#B7C6D0;font-size:13px;margin:0 0 20px;}
+  .lock-card input{
+    width:100%;text-align:center;letter-spacing:6px;font-size:22px;padding:12px;
+    border:none;border-radius:10px;margin-bottom:14px;background:#fff;
+  }
+  .lock-card button.primary{width:100%;}
 </style>
 </head>
 <body>
+
+<div class="lock-overlay" id="lockOverlay">
+  <div class="lock-card">
+    <div class="lock-icon">&#128274;</div>
+    <h2>SK Logistics</h2>
+    <p>Enter staff PIN to continue</p>
+    <input type="password" id="lockPinInput" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off">
+    <button class="primary" onclick="tryUnlock()">Unlock</button>
+  </div>
+</div>
 
 <header>
   <button class="gear" onclick="openSettings()">&#9881;</button>
@@ -208,17 +234,17 @@
     <p class="sub">These are saved on this device only. Your Delhivery API token is never stored here — it lives in your Apps Script backend.</p>
 
     <label class="field-required">Apps Script Web App URL</label>
-    <input id="setAppsScriptUrl" placeholder="https://script.google.com/macros/s/.../exec">
+    <input id="setAppsScriptUrl" placeholder="https://script.google.com/macros/s/AKfycbxBDgkP5ggblWMl0Y1-LPe6SO-8T3V9ahiomji-AlZxHW5ZQ1xQbQjnDHGvZAu3IKzS/exec">
 
     <label>Pickup Location Name</label>
-    <input id="setPickupLocation" placeholder="Exact warehouse name registered with Delhivery">
+    <input id="setPickupLocation" placeholder="SK LOGISTICS">
     <div class="hint">Must match your registered warehouse name exactly (case-sensitive).</div>
 
-    <label>Seller / Client Name</label>
+    <label>Sri Krishna Traders</label>
     <input id="setSellerName" placeholder="e.g. Sri Krishna Traders">
 
     <label>Seller Address</label>
-    <textarea id="setSellerAddress" placeholder="Registered pickup/warehouse address"></textarea>
+    <textarea id="setSellerAddress" placeholder="SK LOGISTICS"></textarea>
 
     <label>Seller GST TIN</label>
     <input id="setSellerGst" placeholder="GSTIN">
@@ -228,6 +254,18 @@
 
     <label>Order ID Prefix</label>
     <input id="setOrderPrefix" placeholder="e.g. SKD">
+
+    <label>Staff PIN</label>
+    <input id="setAccessPin" inputmode="numeric" maxlength="6" placeholder="4-6 digit PIN staff will enter">
+    <div class="hint">Leave as the placeholder text to disable the lock screen entirely.</div>
+
+    <label>SK Logistics Logo (for printed labels)</label>
+    <input type="file" id="setSkLogoFile" accept="image/*">
+    <div id="skLogoPreview" style="margin-top:6px;"></div>
+
+    <label>Delhivery Logo (for printed labels)</label>
+    <input type="file" id="setDelhiveryLogoFile" accept="image/*">
+    <div id="delhiveryLogoPreview" style="margin-top:6px;"></div>
 
     <div class="actions" style="margin-top:16px;">
       <button class="ghost" onclick="closeSettings()">Cancel</button>
@@ -244,8 +282,33 @@ const LS_SETTINGS = 'skl_delhivery_settings';
 const LS_HISTORY = 'skl_delhivery_history';
 let paymentMode = 'Prepaid';
 
+// ------------------------------------------------------------------
+// FILL THESE IN BEFORE PUBLISHING — every staff member's phone will
+// auto-load these values the first time they open the app, so they
+// don't need to touch the Settings screen themselves.
+// ------------------------------------------------------------------
+const DEFAULT_SETTINGS = {
+  appsScriptUrl: 'https://script.google.com/macros/s/AKfycbxBDgkP5ggblWMl0Y1-LPe6SO-8T3V9ahiomji-AlZxHW5ZQ1xQbQjnDHGvZAu3IKzS/exec',
+  pickupLocation: 'PASTE_YOUR_DELHIVERY_PICKUP_LOCATION_NAME',
+  sellerName: 'Sri Krishna Traders',
+  sellerAddress: 'SK LOGISTICS',
+  sellerGst: 'PASTE_YOUR_GSTIN_HERE',
+  hsnCode: '',
+  orderPrefix: 'SKD',
+  accessPin: '2918',
+  skLogoBase64: '',
+  delhiveryLogoBase64: ''
+};
+
 function getSettings(){
-  try { return JSON.parse(localStorage.getItem(LS_SETTINGS)) || {}; } catch(e){ return {}; }
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(LS_SETTINGS)); } catch(e){ stored = null; }
+  if(!stored){
+    localStorage.setItem(LS_SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+    return Object.assign({}, DEFAULT_SETTINGS);
+  }
+  // Merge so any new default fields added later still show up for existing users
+  return Object.assign({}, DEFAULT_SETTINGS, stored);
 }
 function getHistory(){
   try { return JSON.parse(localStorage.getItem(LS_HISTORY)) || []; } catch(e){ return []; }
@@ -259,6 +322,32 @@ function showToast(msg){
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+function pinIsConfigured(){
+  const p = getSettings().accessPin;
+  return p && p.indexOf('PASTE_YOUR') !== 0;
+}
+function isUnlocked(){
+  return sessionStorage.getItem('skl_delhivery_unlocked') === 'yes';
+}
+function tryUnlock(){
+  const entered = document.getElementById('lockPinInput').value.trim();
+  const correctPin = getSettings().accessPin;
+  if(entered && entered === correctPin){
+    sessionStorage.setItem('skl_delhivery_unlocked', 'yes');
+    document.getElementById('lockOverlay').style.display = 'none';
+  } else {
+    showToast('Incorrect PIN');
+    document.getElementById('lockPinInput').value = '';
+    document.getElementById('lockPinInput').focus();
+  }
+}
+document.getElementById('lockPinInput').addEventListener('keydown', function(e){
+  if(e.key === 'Enter') tryUnlock();
+});
+if(!pinIsConfigured() || isUnlocked()){
+  document.getElementById('lockOverlay').style.display = 'none';
 }
 
 function showTab(tab){
@@ -304,8 +393,39 @@ function openSettings(){
   document.getElementById('setSellerGst').value = s.sellerGst || '';
   document.getElementById('setHsnCode').value = s.hsnCode || '';
   document.getElementById('setOrderPrefix').value = s.orderPrefix || 'SKD';
+  document.getElementById('setAccessPin').value = (s.accessPin && s.accessPin.indexOf('PASTE_YOUR') !== 0) ? s.accessPin : '';
+  pendingSkLogo = s.skLogoBase64 || '';
+  pendingDelhiveryLogo = s.delhiveryLogoBase64 || '';
+  renderLogoPreview('skLogoPreview', pendingSkLogo);
+  renderLogoPreview('delhiveryLogoPreview', pendingDelhiveryLogo);
   document.getElementById('settingsOverlay').classList.add('show');
 }
+function renderLogoPreview(elId, base64){
+  const el = document.getElementById(elId);
+  el.innerHTML = base64 ? `<img src="${base64}" style="max-height:36px;max-width:140px;object-fit:contain;">` : '<span class="hint">No logo set</span>';
+}
+let pendingSkLogo = '';
+let pendingDelhiveryLogo = '';
+document.getElementById('setSkLogoFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    pendingSkLogo = ev.target.result;
+    renderLogoPreview('skLogoPreview', pendingSkLogo);
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('setDelhiveryLogoFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    pendingDelhiveryLogo = ev.target.result;
+    renderLogoPreview('delhiveryLogoPreview', pendingDelhiveryLogo);
+  };
+  reader.readAsDataURL(file);
+});
 function closeSettings(){
   document.getElementById('settingsOverlay').classList.remove('show');
 }
@@ -317,7 +437,10 @@ function saveSettings(){
     sellerAddress: document.getElementById('setSellerAddress').value.trim(),
     sellerGst: document.getElementById('setSellerGst').value.trim(),
     hsnCode: document.getElementById('setHsnCode').value.trim(),
-    orderPrefix: document.getElementById('setOrderPrefix').value.trim() || 'SKD'
+    orderPrefix: document.getElementById('setOrderPrefix').value.trim() || 'SKD',
+    accessPin: document.getElementById('setAccessPin').value.trim() || getSettings().accessPin,
+    skLogoBase64: pendingSkLogo,
+    delhiveryLogoBase64: pendingDelhiveryLogo
   };
   localStorage.setItem(LS_SETTINGS, JSON.stringify(s));
   closeSettings();
@@ -353,7 +476,7 @@ function validateForm(){
     return false;
   }
   const settings = getSettings();
-  if(!settings.appsScriptUrl){
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
     showToast('Add your Apps Script URL in Settings first');
     openSettings();
     return false;
@@ -596,16 +719,17 @@ function printLabel(orderId){
 <style>
   @page{ size:100mm 75mm; margin:0; }
   *{box-sizing:border-box;}
-  body{margin:0;width:100mm;height:75mm;font-family:Georgia,'Times New Roman',serif;color:#000;}
+  body{margin:0;width:100mm;height:75mm;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#000;}
   .label{width:100mm;height:75mm;border:1.4px solid #000;display:flex;flex-direction:column;overflow:hidden;}
 
-  .logos{display:flex;border-bottom:1.4px solid #000;height:12mm;}
-  .logos .box{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .logos{display:flex;border-bottom:1.4px solid #000;height:14mm;}
+  .logos .box{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1mm 2mm;}
   .logos .box:first-child{border-right:1.4px solid #000;}
-  .logo-sk{font-family:Arial,Helvetica,sans-serif;font-weight:900;font-size:15px;font-style:italic;}
+  .logos .box img{max-height:11mm;max-width:44mm;object-fit:contain;}
+  .logo-sk{font-weight:800;font-size:15px;font-style:italic;}
   .logo-sk .sk{color:#C0392B;}
   .logo-sk .rest{color:#1B4B66;}
-  .logo-dl{font-family:Arial,Helvetica,sans-serif;font-weight:800;font-size:15px;letter-spacing:.5px;color:#2E3A46;}
+  .logo-dl{font-weight:800;font-size:15px;letter-spacing:.5px;color:#2E3A46;}
 
   .barcode-block{border-bottom:1.4px solid #000;padding:2mm 0 1.5mm;text-align:center;}
   .barcode-block svg{max-width:94mm;}
@@ -627,8 +751,8 @@ function printLabel(orderId){
   <div class="label">
 
     <div class="logos">
-      <div class="box"><span class="logo-sk"><span class="sk">SK</span><span class="rest"> LOGISTICS</span></span></div>
-      <div class="box"><span class="logo-dl">DELHIVERY</span></div>
+      <div class="box">${settings.skLogoBase64 ? `<img src="${settings.skLogoBase64}">` : `<span class="logo-sk"><span class="sk">SK</span><span class="rest"> LOGISTICS</span></span>`}</div>
+      <div class="box">${settings.delhiveryLogoBase64 ? `<img src="${settings.delhiveryLogoBase64}">` : `<span class="logo-dl">DELHIVERY</span>`}</div>
     </div>
 
     <div class="barcode-block">
@@ -685,7 +809,7 @@ document.getElementById('pincode').addEventListener('input', function(){
 document.getElementById('phone').addEventListener('input', function(){
   this.value = this.value.replace(/\D/g,'').slice(0,10);
 });
-if(!getSettings().appsScriptUrl){
+if(!getSettings().appsScriptUrl || getSettings().appsScriptUrl.indexOf('PASTE_YOUR') === 0){
   setTimeout(()=>{ showToast('Set up your Apps Script URL in Settings'); }, 600);
 }
 </script>
