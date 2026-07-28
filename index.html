@@ -134,6 +134,8 @@
 
       <div class="card">
         <h2>Consignee</h2>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="document.getElementById('scanAddressInput').click()">Scan Address from Photo</button>
+        <input type="file" id="scanAddressInput" accept="image/*" capture="environment" style="display:none;">
         <label class="field-required">Name</label>
         <input id="consigneeName" required placeholder="Recipient full name">
         <label class="field-required">Phone</label>
@@ -283,6 +285,7 @@
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 const LS_SETTINGS = 'skl_delhivery_settings';
 const LS_HISTORY = 'skl_delhivery_history';
@@ -337,6 +340,93 @@ function showToast(msg){
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
+
+function resizeImageToCanvas(file, maxDim){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const img = new Image();
+      img.onload = function(){
+        let { width, height } = img;
+        if(width > maxDim || height > maxDim){
+          if(width > height){ height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+        resolve(canvas);
+      };
+      img.onerror = () => reject(new Error('Could not load that image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Could not read that file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function applyScannedFields(fields){
+  if(fields.name && !document.getElementById('consigneeName').value.trim()) document.getElementById('consigneeName').value = fields.name;
+  if(fields.phone && !document.getElementById('phone').value.trim()) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
+  if(fields.address && !document.getElementById('address').value.trim()) document.getElementById('address').value = fields.address;
+  if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
+  if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
+  if(fields.pincode && !document.getElementById('pincode').value.trim()){
+    const pin = fields.pincode.replace(/\D/g,'').slice(0,6);
+    document.getElementById('pincode').value = pin;
+    if(pin.length === 6) checkPincodeUI(pin);
+  }
+}
+
+function parseOcrText(text){
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  const numberTokens = text.match(/\d{6,12}/g) || [];
+  let phone = '';
+  for(const tok of numberTokens){
+    const digits = tok.replace(/\D/g,'');
+    if(!phone && digits.length === 10){ phone = digits; break; }
+  }
+
+  const sixDigitMatches = text.match(/\b\d{6}\b/g) || [];
+  let pincode = '';
+  for(const tok of sixDigitMatches){
+    if(tok !== phone){ pincode = tok; break; }
+  }
+
+  // Crude split: first line as name, remaining lines joined as address.
+  // Free/on-device OCR can't reliably separate name/city/state, so those
+  // are left for the person to tidy up.
+  const name = lines.length ? lines[0] : '';
+  const address = lines.slice(1).join(', ');
+
+  return { name, phone, address, city: '', state: '', pincode };
+}
+
+async function scanAddressImage(file){
+  showToast('Reading text from photo… this can take a few seconds');
+  try{
+    const canvas = await resizeImageToCanvas(file, 1800);
+    const result = await Tesseract.recognize(canvas, 'eng');
+    const text = (result && result.data && result.data.text) || '';
+    if(!text.trim()){
+      showToast('Could not read any text from that photo');
+      return;
+    }
+    const fields = parseOcrText(text);
+    applyScannedFields(fields);
+    showToast('Filled in from photo — please check it carefully, especially handwriting');
+  }catch(err){
+    showToast('Could not process that photo: ' + err.message);
+  }
+}
+
+document.getElementById('scanAddressInput').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(file) scanAddressImage(file);
+  this.value = '';
+});
 
 function pinIsConfigured(){
   const p = getSettings().accessPin;
