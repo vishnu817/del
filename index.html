@@ -282,6 +282,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 const LS_SETTINGS = 'skl_delhivery_settings';
 const LS_HISTORY = 'skl_delhivery_history';
@@ -625,6 +626,9 @@ function handleResult(payload, data){
         <div class="hint">Order ID: ${escapeHtml(payload.orderId)}</div>
         <div class="actions">
           <button class="ghost" onclick="printLabel('${escapeAttr(entry.orderId)}')">Print Label</button>
+          <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print App</button>
+        </div>
+        <div class="actions">
           <button class="ghost" onclick="fetchOfficialLabel('${escapeAttr(entry.orderId)}')">Official PDF</button>
         </div>
         <div class="actions">
@@ -669,7 +673,7 @@ function renderHistory(){
       </div>
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
-      ${h.success ? `<div class="actions"><button class="ghost" onclick="printLabel('${escapeAttr(h.orderId)}')">Print Label</button><button class="ghost" onclick="fetchOfficialLabel('${escapeAttr(h.orderId)}')">Official PDF</button></div><div class="actions"><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="printLabel('${escapeAttr(h.orderId)}')">Print Label</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print App</button></div><div class="actions"><button class="ghost" onclick="fetchOfficialLabel('${escapeAttr(h.orderId)}')">Official PDF</button><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
     </div>
   `).join('');
 }
@@ -798,16 +802,8 @@ async function fetchOfficialLabel(orderId){
 }
 
 // ---- Label printing (100mm x 75mm) ----
-function printLabel(orderId){
-  const hist = getHistory();
-  const entry = hist.find(h => h.orderId === orderId);
-  if(!entry || !entry.waybill){
-    showToast('No AWB found for this order yet');
-    return;
-  }
-  const settings = getSettings();
-  const win = window.open('', '_blank');
-  const html = `<!DOCTYPE html>
+function buildLabelDocumentHtml(entry, settings, autoPrint){
+  return `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Label ${escapeHtml(entry.orderId)}</title>
 <style>
   @page{ size:100mm 75mm; margin:0; }
@@ -887,11 +883,71 @@ function printLabel(orderId){
     displayValue: false,
     margin: 0
   });
-  window.onload = function(){ setTimeout(function(){ window.print(); }, 250); };
+  ${autoPrint ? 'window.onload = function(){ setTimeout(function(){ window.print(); }, 250); };' : ''}
 <\/script>
 </body></html>`;
-  win.document.write(html);
+}
+
+function printLabel(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  const settings = getSettings();
+  const win = window.open('', '_blank');
+  win.document.write(buildLabelDocumentHtml(entry, settings, true));
   win.document.close();
+}
+
+async function shareLabelToPrinterApp(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  const settings = getSettings();
+  showToast('Preparing label image…');
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:500px;height:400px;border:0;';
+  document.body.appendChild(iframe);
+
+  iframe.onload = async function(){
+    try{
+      await new Promise(r => setTimeout(r, 200)); // let the barcode SVG finish painting
+      const labelEl = iframe.contentDocument.querySelector('.label');
+      const canvas = await html2canvas(labelEl, { scale: 4, backgroundColor: '#ffffff' });
+      canvas.toBlob(async function(blob){
+        if(iframe.parentNode) document.body.removeChild(iframe);
+        if(!blob){
+          showToast('Could not generate label image');
+          return;
+        }
+        const file = new File([blob], entry.orderId + '_label.png', { type: 'image/png' });
+        if(navigator.canShare && navigator.canShare({ files: [file] })){
+          try{
+            await navigator.share({ files: [file], title: 'Shipping Label', text: entry.orderId });
+          }catch(shareErr){
+            // User cancelled the share sheet — not an error worth surfacing
+          }
+        } else {
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          showToast('Long-press the image and choose your printer app to share it');
+        }
+      }, 'image/png');
+    }catch(err){
+      if(iframe.parentNode) document.body.removeChild(iframe);
+      showToast('Could not generate label image: ' + err.message);
+    }
+  };
+
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(buildLabelDocumentHtml(entry, settings, false));
+  iframe.contentDocument.close();
 }
 
 // Init
