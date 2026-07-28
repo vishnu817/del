@@ -532,7 +532,8 @@ function buildPayload(){
   };
 }
 
-function jsonpRequest(action, dataObj){
+function jsonpRequest(action, dataObj, timeoutMs){
+  timeoutMs = timeoutMs || 20000;
   return new Promise((resolve, reject) => {
     const settings = getSettings();
     if(!settings.appsScriptUrl){
@@ -545,7 +546,7 @@ function jsonpRequest(action, dataObj){
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error('Request timed out — check your Apps Script URL and deployment access'));
-    }, 20000);
+    }, timeoutMs);
 
     function cleanup(){
       clearTimeout(timeoutId);
@@ -779,7 +780,7 @@ async function fetchOfficialLabel(orderId){
   }
   showToast('Fetching official label from Delhivery…');
   try{
-    const data = await jsonpRequest('officialLabel', { waybill: entry.waybill });
+    const data = await jsonpRequest('officialLabel', { waybill: entry.waybill }, 45000);
     if(data.success && data.pdfBase64){
       const croppedBytes = await cropOfficialLabelPdf(data.pdfBase64);
       const blob = new Blob([croppedBytes], { type: 'application/pdf' });
@@ -826,7 +827,7 @@ function printLabel(orderId){
   .barcode-block{border-bottom:1.4px solid #000;padding:2mm 0 1.5mm;text-align:center;}
   .barcode-block svg{max-width:96mm;height:auto;}
   .awb-text{font-size:13px;font-weight:700;letter-spacing:1.5px;margin-top:0.5mm;}
-  .dest-office{border-bottom:1.4px solid #000;padding:1mm 2.5mm;font-size:10px;font-weight:700;text-align:center;}
+  .dest-office-inline{font-size:9.5px;font-weight:700;color:#333;margin-top:0.5mm;}
 
   .pincode-row{display:flex;border-bottom:1.4px solid #000;height:11mm;}
   .pincode-row .pin{flex:1;display:flex;align-items:center;padding-left:2.5mm;font-size:22px;font-weight:700;}
@@ -851,13 +852,13 @@ function printLabel(orderId){
     <div class="barcode-block">
       <svg id="barcode"></svg>
       <div class="awb-text">${escapeHtml(entry.waybill)}</div>
+      ${entry.destinationOffice ? `<div class="dest-office-inline">${escapeHtml(entry.destinationOffice)}</div>` : ''}
     </div>
 
     <div class="pincode-row">
       <div class="pin">${escapeHtml(entry.pincode || '')}</div>
       <div class="svc">${escapeHtml(entry.serviceType || 'Surface')}</div>
     </div>
-    ${entry.destinationOffice ? `<div class="dest-office">${escapeHtml(entry.destinationOffice)}</div>` : ''}
 
     <div class="body-row">
       <div class="addr">
