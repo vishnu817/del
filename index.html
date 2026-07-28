@@ -1019,7 +1019,7 @@ async function shareLabelToPrinterApp(orderId){
           showToast('Could not generate label image');
           return;
         }
-        const file = new File([blob], entry.orderId + '_label.png', { type: 'image/png' });
+        const file = new File([blob], entry.orderId + '_label.jpg', { type: 'image/jpeg' });
         if(navigator.canShare && navigator.canShare({ files: [file] })){
           try{
             await navigator.share({ files: [file], title: 'Shipping Label', text: entry.orderId });
@@ -1031,7 +1031,7 @@ async function shareLabelToPrinterApp(orderId){
           window.open(url, '_blank');
           showToast('Long-press the image and choose your printer app to share it');
         }
-      }, 'image/png');
+      }, 'image/jpeg', 0.95);
     }catch(err){
       if(iframe.parentNode) document.body.removeChild(iframe);
       showToast('Could not generate label image: ' + err.message);
