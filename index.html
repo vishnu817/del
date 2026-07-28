@@ -715,11 +715,8 @@ function handleResult(payload, data){
         <div class="wb">AWB: ${escapeHtml(data.waybill)}</div>
         <div class="hint">Order ID: ${escapeHtml(payload.orderId)}</div>
         <div class="actions">
-          <button class="ghost" onclick="printLabel('${escapeAttr(entry.orderId)}')">Print Label</button>
-          <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print App</button>
-        </div>
-        <div class="actions">
-          <button class="ghost" onclick="fetchOfficialLabel('${escapeAttr(entry.orderId)}')">Official PDF</button>
+          <button class="ghost" onclick="downloadLabelPdf('${escapeAttr(entry.orderId)}')">Download PDF</button>
+          <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print to App</button>
         </div>
         <div class="actions">
           <button class="ghost" onclick="shareWhatsApp('${escapeAttr(entry.orderId)}')">Share</button>
@@ -763,7 +760,7 @@ function renderHistory(){
       </div>
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
-      ${h.success ? `<div class="actions"><button class="ghost" onclick="printLabel('${escapeAttr(h.orderId)}')">Print Label</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print App</button></div><div class="actions"><button class="ghost" onclick="fetchOfficialLabel('${escapeAttr(h.orderId)}')">Official PDF</button><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions"><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
     </div>
   `).join('');
 }
@@ -981,7 +978,7 @@ function buildLabelDocumentHtml(entry, settings, autoPrint){
 </body></html>`;
 }
 
-function printLabel(orderId){
+async function downloadLabelPdf(orderId){
   const hist = getHistory();
   const entry = hist.find(h => h.orderId === orderId);
   if(!entry || !entry.waybill){
@@ -989,9 +986,54 @@ function printLabel(orderId){
     return;
   }
   const settings = getSettings();
-  const win = window.open('', '_blank');
-  win.document.write(buildLabelDocumentHtml(entry, settings, true));
-  win.document.close();
+  showToast('Generating label PDF…');
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:500px;height:400px;border:0;';
+  document.body.appendChild(iframe);
+
+  iframe.onload = async function(){
+    try{
+      await new Promise(r => setTimeout(r, 200)); // let the barcode SVG finish painting
+      const labelEl = iframe.contentDocument.querySelector('.label');
+      const canvas = await html2canvas(labelEl, { scale: 4, backgroundColor: '#ffffff' });
+      if(iframe.parentNode) document.body.removeChild(iframe);
+
+      const imgDataUrl = canvas.toDataURL('image/png');
+      const imgBase64 = imgDataUrl.split(',')[1];
+      const binary = atob(imgBase64);
+      const imgBytes = new Uint8Array(binary.length);
+      for(let i = 0; i < binary.length; i++){ imgBytes[i] = binary.charCodeAt(i); }
+
+      const mmToPt = 2.834645669; // 1mm in PDF points
+      const pageWidth = 100 * mmToPt;
+      const pageHeight = 75 * mmToPt;
+
+      const pdfDoc = await PDFLib.PDFDocument.create();
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const pngImage = await pdfDoc.embedPng(imgBytes);
+      page.drawImage(pngImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = entry.orderId + '_label.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast('Label PDF downloaded');
+    }catch(err){
+      if(iframe.parentNode) document.body.removeChild(iframe);
+      showToast('Could not generate PDF: ' + err.message);
+    }
+  };
+
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(buildLabelDocumentHtml(entry, settings, false));
+  iframe.contentDocument.close();
 }
 
 async function shareLabelToPrinterApp(orderId){
