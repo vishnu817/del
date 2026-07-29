@@ -423,13 +423,29 @@ function applyScannedFields(fields){
 function parseOcrText(text){
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  const numberTokens = text.match(/\d{6,12}/g) || [];
+  // Phone: search line-by-line (so numbers on different lines never merge
+  // into one), allowing embedded spaces/hyphens like "98765 43210" or
+  // "+91-98765-43210".
   let phone = '';
-  for(const tok of numberTokens){
-    const digits = tok.replace(/\D/g,'');
-    if(!phone && digits.length === 10){ phone = digits; break; }
+  for(const line of lines){
+    const lineChunks = line.match(/\d[\d\s-]*\d|\d/g) || [];
+    for(const chunk of lineChunks){
+      const digits = chunk.replace(/\D/g, '');
+      if(digits.length === 10 && /^[6-9]/.test(digits)){ phone = digits; break; }
+      if(digits.length === 12 && digits.startsWith('91') && /^[6-9]/.test(digits.slice(2))){ phone = digits.slice(2); break; }
+      if(digits.length === 11 && digits.startsWith('0') && /^[6-9]/.test(digits.slice(1))){ phone = digits.slice(1); break; }
+    }
+    if(phone) break;
+  }
+  // Fallback: accept any bare 10-digit run if the stricter checks above found nothing
+  if(!phone){
+    const anyTenDigit = text.match(/\d{10}/g) || [];
+    if(anyTenDigit.length) phone = anyTenDigit[0];
   }
 
+  // Pincode: a clean, unbroken 6-digit number. Deliberately NOT using the
+  // flexible hyphen-tolerant matching used for phone above, since Indian
+  // address components (e.g. "19-1-398") can otherwise be misread as a pincode.
   const sixDigitMatches = text.match(/\b\d{6}\b/g) || [];
   let pincode = '';
   for(const tok of sixDigitMatches){
