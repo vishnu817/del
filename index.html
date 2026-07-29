@@ -134,7 +134,7 @@
 
       <div class="card">
         <h2>Consignee</h2>
-        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="document.getElementById('scanAddressInput').click()">Scan Address from Photo</button>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="triggerScanAddress()">Scan Address from Photo</button>
         <input type="file" id="scanAddressInput" accept="image/*" capture="environment" style="display:none;">
         <label class="field-required">Name</label>
         <input id="consigneeName" required placeholder="Recipient full name">
@@ -285,7 +285,6 @@
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 const LS_SETTINGS = 'skl_delhivery_settings';
 const LS_HISTORY = 'skl_delhivery_history';
@@ -339,6 +338,48 @@ function showToast(msg){
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+function uint8ArrayToBase64(bytes){
+  let binary = '';
+  const chunkSize = 8192;
+  for(let i = 0; i < bytes.length; i += chunkSize){
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function blobToBase64(blob){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Could not read image data'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function isNativeApp(){
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+}
+
+function dataUrlToCanvas(dataUrl, maxDim){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = function(){
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        if(width > height){ height = Math.round(height * maxDim / width); width = maxDim; }
+        else { width = Math.round(width * maxDim / height); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas);
+    };
+    img.onerror = () => reject(new Error('Could not load that photo'));
+    img.src = dataUrl;
+  });
 }
 
 function resizeImageToCanvas(file, maxDim){
@@ -404,21 +445,91 @@ function parseOcrText(text){
   return { name, phone, address, city: '', state: '', pincode };
 }
 
+async function extractTextViaVisionApi(canvas){
+  const settings = getSettings();
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+    throw new Error('Set up your Apps Script URL in Settings first');
+  }
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  const imageBase64 = dataUrl.split(',')[1];
+  const jobId = 'ocr_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+
+  // Fire-and-forget submit — no-cors avoids Apps Script's CORS/redirect issue,
+  // and the payload is too large for our usual JSONP (URL-length-limited) calls.
+  fetch(settings.appsScriptUrl, {
+    method: 'POST',
+    mode: 'no-cors',
+    body: JSON.stringify({ action: 'ocrSubmit', jobId: jobId, imageBase64: imageBase64 })
+  }).catch(() => { /* opaque no-cors response — ignore */ });
+
+  const maxAttempts = 30; // ~45s at 1.5s intervals
+  for(let i = 0; i < maxAttempts; i++){
+    await new Promise(r => setTimeout(r, 1500));
+    let result;
+    try{
+      result = await jsonpRequest('ocrPoll', { jobId }, 10000);
+    }catch(err){
+      continue; // transient poll miss, keep trying
+    }
+    if(result && result.status === 'done'){
+      if(result.success){
+        return result.text || '';
+      }
+      throw new Error(result.error || 'Could not read that photo');
+    }
+  }
+  throw new Error('Scan took too long — please try again');
+}
+
 async function scanAddressImage(file){
   showToast('Reading text from photo… this can take a few seconds');
   try{
     const canvas = await resizeImageToCanvas(file, 1800);
-    const result = await Tesseract.recognize(canvas, 'eng');
-    const text = (result && result.data && result.data.text) || '';
+    const text = await extractTextViaVisionApi(canvas);
     if(!text.trim()){
       showToast('Could not read any text from that photo');
       return;
     }
     const fields = parseOcrText(text);
     applyScannedFields(fields);
-    showToast('Filled in from photo — please check it carefully, especially handwriting');
+    showToast('Filled in from photo — please check it carefully');
   }catch(err){
     showToast('Could not process that photo: ' + err.message);
+  }
+}
+
+async function triggerScanAddress(){
+  if(isNativeApp()){
+    await scanAddressImageNative();
+  } else {
+    document.getElementById('scanAddressInput').click();
+  }
+}
+
+async function scanAddressImageNative(){
+  try{
+    const { Camera } = window.Capacitor.Plugins;
+    const photo = await Camera.getPhoto({
+      quality: 85,
+      resultType: 'dataUrl',
+      source: 'PROMPT', // lets the user pick Camera or Gallery
+      saveToGallery: false
+    });
+    showToast('Reading text from photo… this can take a few seconds');
+    const canvas = await dataUrlToCanvas(photo.dataUrl, 1800);
+    const text = await extractTextViaVisionApi(canvas);
+    if(!text.trim()){
+      showToast('Could not read any text from that photo');
+      return;
+    }
+    const fields = parseOcrText(text);
+    applyScannedFields(fields);
+    showToast('Filled in from photo — please check it carefully');
+  }catch(err){
+    if(err && err.message && err.message.indexOf('cancel') !== -1){
+      return; // user cancelled the camera/gallery picker — not an error
+    }
+    showToast('Could not process that photo: ' + (err.message || 'unknown error'));
   }
 }
 
@@ -1015,6 +1126,18 @@ async function downloadLabelPdf(orderId){
       page.drawImage(pngImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
 
       const pdfBytes = await pdfDoc.save();
+
+      if(isNativeApp()){
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const pdfBase64 = uint8ArrayToBase64(pdfBytes);
+        const fileName = entry.orderId + '_label.pdf';
+        await Filesystem.writeFile({ path: fileName, data: pdfBase64, directory: 'CACHE' });
+        const uriResult = await Filesystem.getUri({ path: fileName, directory: 'CACHE' });
+        await Share.share({ title: 'Shipping Label PDF', text: entry.orderId, url: uriResult.uri });
+        showToast('Label PDF ready — save or share it from there');
+        return;
+      }
+
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1061,6 +1184,23 @@ async function shareLabelToPrinterApp(orderId){
           showToast('Could not generate label image');
           return;
         }
+
+        if(isNativeApp()){
+          try{
+            const { Filesystem, Share } = window.Capacitor.Plugins;
+            const base64 = await blobToBase64(blob);
+            const fileName = entry.orderId + '_label.jpg';
+            await Filesystem.writeFile({ path: fileName, data: base64, directory: 'CACHE' });
+            const uriResult = await Filesystem.getUri({ path: fileName, directory: 'CACHE' });
+            await Share.share({ title: 'Shipping Label', text: entry.orderId, url: uriResult.uri });
+          }catch(shareErr){
+            if(!(shareErr && shareErr.message && shareErr.message.indexOf('cancel') !== -1)){
+              showToast('Could not share label: ' + (shareErr.message || 'unknown error'));
+            }
+          }
+          return;
+        }
+
         const file = new File([blob], entry.orderId + '_label.jpg', { type: 'image/jpeg' });
         if(navigator.canShare && navigator.canShare({ files: [file] })){
           try{
