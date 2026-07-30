@@ -79,6 +79,20 @@
   .modal p.sub{font-size:12.5px;color:var(--muted);margin:0 0 14px;}
   .modal-close{float:right;background:none;border:none;font-size:22px;color:var(--muted);line-height:1;}
   .field-required::after{content:" *";color:var(--accent-dark);}
+
+  .underline-label{margin-top:16px;font-size:12.5px;color:var(--muted);font-weight:600;}
+  .underline-input{
+    width:100%;border:none;border-bottom:1.5px solid var(--line);border-radius:0;
+    background:transparent;padding:9px 2px;font-size:16px;color:var(--text);
+  }
+  .underline-input:focus{outline:none;border-bottom-color:var(--accent);background:transparent;}
+
+  .chip-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
+  .chip{
+    border:1px solid var(--line);background:#FBFCFC;color:var(--text);
+    padding:6px 12px;border-radius:20px;font-size:12.5px;font-weight:600;
+  }
+  .chip.sel{background:var(--navy);border-color:var(--navy);color:#fff;}
   .toast{position:fixed;bottom:78px;left:50%;transform:translateX(-50%);background:var(--navy);color:#fff;padding:10px 18px;border-radius:20px;font-size:13.5px;z-index:60;opacity:0;transition:opacity .2s;}
   .toast.show{opacity:1;}
 
@@ -136,25 +150,31 @@
         <h2>Consignee</h2>
         <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="triggerScanAddress()">Scan Address from Photo</button>
         <input type="file" id="scanAddressInput" accept="image/*" capture="environment" style="display:none;">
-        <label class="field-required">Name</label>
-        <input id="consigneeName" required placeholder="Recipient full name">
-        <label class="field-required">Phone</label>
-        <input id="phone" required inputmode="numeric" maxlength="10" placeholder="10-digit mobile number">
-        <label class="field-required">Address</label>
-        <textarea id="address" required placeholder="House/street, area, landmark"></textarea>
-        <div class="row">
-          <div>
-            <label class="field-required">Pincode</label>
-            <input id="pincode" required inputmode="numeric" maxlength="6">
-          </div>
-          <div>
-            <label>City</label>
-            <input id="city" placeholder="Auto-fills from pincode">
-          </div>
-        </div>
-        <label>State</label>
-        <input id="state" placeholder="Auto-fills from pincode">
+
+        <label class="field-required underline-label">Receiver Name</label>
+        <input class="underline-input" id="consigneeName" required placeholder="Recipient full name">
+
+        <label class="field-required underline-label">Phone Number</label>
+        <input class="underline-input" id="phone" required inputmode="numeric" maxlength="10" placeholder="10-digit mobile number">
+
+        <label class="field-required underline-label">Pincode</label>
+        <input class="underline-input" id="pincode" required inputmode="numeric" maxlength="6">
         <div id="pincodeStatus" class="hint"></div>
+
+        <label class="field-required underline-label">Address Line 1</label>
+        <input class="underline-input" id="address1" required placeholder="House/flat no., street">
+
+        <label class="underline-label">Address Line 2</label>
+        <input class="underline-input" id="address2" placeholder="Area, landmark">
+
+        <label class="underline-label">Address Line 3</label>
+        <input class="underline-input" id="address3" placeholder="Optional">
+
+        <label class="underline-label">State</label>
+        <input class="underline-input" id="state" placeholder="Auto-fills from pincode">
+
+        <label class="underline-label">City</label>
+        <input class="underline-input" id="city" placeholder="Auto-fills from pincode">
       </div>
 
       <div class="card">
@@ -174,6 +194,20 @@
       <div class="card">
         <h2>Package</h2>
         <label>Contents Description</label>
+        <div class="chip-row" id="contentChips">
+          <button type="button" class="chip" data-value="Clothes">Clothes</button>
+          <button type="button" class="chip" data-value="Electronics">Electronics</button>
+          <button type="button" class="chip" data-value="Medicines">Medicines</button>
+          <button type="button" class="chip" data-value="Documents">Documents</button>
+          <button type="button" class="chip" data-value="Footwear">Footwear</button>
+          <button type="button" class="chip" data-value="Cosmetics">Cosmetics</button>
+          <button type="button" class="chip" data-value="Books">Books</button>
+          <button type="button" class="chip" data-value="Toys">Toys</button>
+          <button type="button" class="chip" data-value="Jewellery">Jewellery</button>
+          <button type="button" class="chip" data-value="Food Items">Food Items</button>
+          <button type="button" class="chip" data-value="Gift Items">Gift Items</button>
+          <button type="button" class="chip" data-value="Household Items">Household Items</button>
+        </div>
         <input id="productsDesc" placeholder="e.g. Documents, Garments, Electronics">
         <div class="row">
           <div>
@@ -410,7 +444,12 @@ function resizeImageToCanvas(file, maxDim){
 function applyScannedFields(fields){
   if(fields.name && !document.getElementById('consigneeName').value.trim()) document.getElementById('consigneeName').value = fields.name;
   if(fields.phone && !document.getElementById('phone').value.trim()) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
-  if(fields.address && !document.getElementById('address').value.trim()) document.getElementById('address').value = fields.address;
+  if(fields.address && !document.getElementById('address1').value.trim()){
+    const parts = fields.address.split(',').map(s => s.trim()).filter(Boolean);
+    document.getElementById('address1').value = parts[0] || '';
+    document.getElementById('address2').value = parts[1] || '';
+    document.getElementById('address3').value = parts.slice(2).join(', ');
+  }
   if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
   if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
   if(fields.pincode && !document.getElementById('pincode').value.trim()){
@@ -452,11 +491,19 @@ function parseOcrText(text){
     if(tok !== phone){ pincode = tok; break; }
   }
 
-  // Crude split: first line as name, remaining lines joined as address.
-  // Free/on-device OCR can't reliably separate name/city/state, so those
-  // are left for the person to tidy up.
+  // Crude split: first line as name, remaining lines joined as address —
+  // except any line that's essentially just the phone number or pincode we
+  // already pulled out above (e.g. "Ph: 98765 43210", "PIN: 500064"),
+  // so those don't get duplicated into the address text too.
   const name = lines.length ? lines[0] : '';
-  const address = lines.slice(1).join(', ');
+  const addressLines = lines.slice(1).filter(line => {
+    const lineDigits = line.replace(/\D/g, '');
+    if(!lineDigits) return true; // no digits at all — definitely address text, keep it
+    if(phone && lineDigits.endsWith(phone)) return false;
+    if(pincode && lineDigits === pincode) return false;
+    return true;
+  });
+  const address = addressLines.join(', ');
 
   return { name, phone, address, city: '', state: '', pincode };
 }
@@ -553,6 +600,23 @@ document.getElementById('scanAddressInput').addEventListener('change', function(
   const file = e.target.files[0];
   if(file) scanAddressImage(file);
   this.value = '';
+});
+
+document.getElementById('contentChips').addEventListener('click', function(e){
+  const btn = e.target.closest('.chip');
+  if(!btn) return;
+  const value = btn.dataset.value;
+  const input = document.getElementById('productsDesc');
+  const already = input.value.split(',').map(s => s.trim()).filter(Boolean);
+  const idx = already.indexOf(value);
+  if(idx === -1){
+    already.push(value);
+    btn.classList.add('sel');
+  } else {
+    already.splice(idx, 1);
+    btn.classList.remove('sel');
+  }
+  input.value = already.join(', ');
 });
 
 function pinIsConfigured(){
@@ -685,7 +749,7 @@ function validateForm(){
   const required = [
     ['consigneeName','Consignee name'],
     ['phone','Phone number'],
-    ['address','Address'],
+    ['address1','Address Line 1'],
     ['pincode','Pincode'],
     ['weightKg','Weight']
   ];
@@ -725,7 +789,11 @@ function buildPayload(){
     orderId: document.getElementById('orderId').value.trim(),
     consigneeName: document.getElementById('consigneeName').value.trim(),
     phone: document.getElementById('phone').value.trim(),
-    address: document.getElementById('address').value.trim(),
+    address: [
+      document.getElementById('address1').value.trim(),
+      document.getElementById('address2').value.trim(),
+      document.getElementById('address3').value.trim()
+    ].filter(Boolean).join(', '),
     pincode: document.getElementById('pincode').value.trim(),
     city: document.getElementById('city').value.trim(),
     state: document.getElementById('state').value.trim(),
@@ -869,6 +937,7 @@ function startNewBooking(){
   document.getElementById('resultBox').innerHTML = '';
   document.getElementById('bookingForm').reset();
   setPayMode('Prepaid');
+  document.querySelectorAll('#contentChips .chip.sel').forEach(el => el.classList.remove('sel'));
   document.getElementById('orderId').value = generateOrderId();
 }
 
