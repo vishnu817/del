@@ -106,6 +106,32 @@
     border:none;border-radius:10px;margin-bottom:14px;background:#fff;
   }
   .lock-card button.primary{width:100%;}
+
+  .camera-modal{position:fixed;inset:0;background:#000;z-index:250;display:none;flex-direction:column;}
+  .camera-modal.show{display:flex;}
+  #cameraVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  .camera-overlay{position:absolute;inset:0;}
+  .camera-dim{position:absolute;background:rgba(0,0,0,0.55);}
+  .camera-dim-top{top:0;left:0;right:0;height:12.5%;}
+  .camera-dim-bottom{bottom:0;left:0;right:0;height:12.5%;}
+  .camera-dim-left{top:12.5%;bottom:12.5%;left:0;width:12.5%;}
+  .camera-dim-right{top:12.5%;bottom:12.5%;right:0;width:12.5%;}
+  .camera-guide{
+    position:absolute;top:12.5%;left:12.5%;right:12.5%;bottom:12.5%;
+    border:2.5px solid #fff;border-radius:14px;box-shadow:0 0 0 2000px rgba(0,0,0,0);
+  }
+  .camera-hint{
+    position:absolute;top:calc(12.5% - 34px);left:0;right:0;text-align:center;
+    color:#fff;font-size:13.5px;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.6);
+  }
+  .camera-controls{
+    position:absolute;bottom:0;left:0;right:0;padding:22px 24px calc(22px + env(safe-area-inset-bottom));
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .camera-btn-cancel{background:none;border:none;color:#fff;font-size:15px;font-weight:600;width:70px;text-align:left;}
+  .camera-btn-shutter{
+    width:68px;height:68px;border-radius:50%;background:#fff;border:4px solid rgba(255,255,255,.4);
+  }
 </style>
 </head>
 <body>
@@ -117,6 +143,23 @@
     <p>Enter staff PIN to continue</p>
     <input type="password" id="lockPinInput" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off">
     <button class="primary" onclick="tryUnlock()">Unlock</button>
+  </div>
+</div>
+
+<div class="camera-modal" id="cameraModal">
+  <video id="cameraVideo" autoplay playsinline muted></video>
+  <div class="camera-overlay">
+    <div class="camera-dim camera-dim-top"></div>
+    <div class="camera-dim camera-dim-bottom"></div>
+    <div class="camera-dim camera-dim-left"></div>
+    <div class="camera-dim camera-dim-right"></div>
+    <div class="camera-guide"></div>
+  </div>
+  <p class="camera-hint">Fit the address inside the box</p>
+  <div class="camera-controls">
+    <button type="button" class="camera-btn-cancel" onclick="closeCameraCapture()">Cancel</button>
+    <button type="button" class="camera-btn-shutter" onclick="captureFromCamera()" aria-label="Capture"></button>
+    <span style="width:70px;"></span>
   </div>
 </div>
 
@@ -148,7 +191,8 @@
 
       <div class="card">
         <h2>Consignee</h2>
-        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="triggerScanAddress()">Scan Address from Photo</button>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:8px;" onclick="triggerScanAddress()">Scan Address from Photo</button>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;font-size:12px;" onclick="triggerGalleryPick()">Choose from Gallery instead</button>
         <input type="file" id="scanAddressInput" accept="image/*" capture="environment" style="display:none;">
 
         <label class="field-required underline-label">Receiver Name</label>
@@ -166,9 +210,6 @@
 
         <label class="underline-label">Address Line 2</label>
         <input class="underline-input" id="address2" placeholder="Area, landmark">
-
-        <label class="underline-label">Address Line 3</label>
-        <input class="underline-input" id="address3" placeholder="Optional">
 
         <label class="underline-label">State</label>
         <input class="underline-input" id="state" placeholder="Auto-fills from pincode">
@@ -215,8 +256,8 @@
             <input id="quantity" inputmode="numeric" value="1">
           </div>
           <div>
-            <label class="field-required">Weight (kg)</label>
-            <input id="weightKg" inputmode="decimal" placeholder="e.g. 0.5">
+            <label class="field-required">Weight (grams)</label>
+            <input id="weightGrams" inputmode="numeric" placeholder="e.g. 500">
           </div>
           <div>
             <label>Service</label>
@@ -447,8 +488,7 @@ function applyScannedFields(fields){
   if(fields.address && !document.getElementById('address1').value.trim()){
     const parts = fields.address.split(',').map(s => s.trim()).filter(Boolean);
     document.getElementById('address1').value = parts[0] || '';
-    document.getElementById('address2').value = parts[1] || '';
-    document.getElementById('address3').value = parts.slice(2).join(', ');
+    document.getElementById('address2').value = parts.slice(1).join(', ');
   }
   if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
   if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
@@ -563,23 +603,115 @@ async function scanAddressImage(file){
 
 async function triggerScanAddress(){
   if(isNativeApp()){
-    await scanAddressImageNative();
+    await scanAddressImageNative('CAMERA');
+  } else {
+    await openCameraCapture();
+  }
+}
+
+async function triggerGalleryPick(){
+  if(isNativeApp()){
+    await scanAddressImageNative('PHOTOS');
   } else {
     document.getElementById('scanAddressInput').click();
   }
 }
 
-async function scanAddressImageNative(){
+function cropCanvasCenter(canvas, fraction){
+  const w = canvas.width, h = canvas.height;
+  const cw = w * fraction, ch = h * fraction;
+  const cx = (w - cw) / 2, cy = (h - ch) / 2;
+  const out = document.createElement('canvas');
+  out.width = cw;
+  out.height = ch;
+  out.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+  return out;
+}
+
+let activeCameraStream = null;
+
+async function openCameraCapture(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    showToast('Camera not available in this browser — using gallery instead');
+    document.getElementById('scanAddressInput').click();
+    return;
+  }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+    activeCameraStream = stream;
+    const video = document.getElementById('cameraVideo');
+    video.srcObject = stream;
+    document.getElementById('cameraModal').classList.add('show');
+  }catch(err){
+    showToast('Could not access camera — using gallery instead');
+    document.getElementById('scanAddressInput').click();
+  }
+}
+
+function closeCameraCapture(){
+  document.getElementById('cameraModal').classList.remove('show');
+  if(activeCameraStream){
+    activeCameraStream.getTracks().forEach(t => t.stop());
+    activeCameraStream = null;
+  }
+}
+
+async function captureFromCamera(){
+  const video = document.getElementById('cameraVideo');
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if(!vw || !vh){
+    showToast('Camera still starting up — try again in a moment');
+    return;
+  }
+
+  // Crop to just the guide box region (the centered 75% x 75% area shown
+  // on screen), so background/packing-tape text outside it never reaches OCR.
+  const cropW = vw * 0.75;
+  const cropH = vh * 0.75;
+  const cropX = (vw - cropW) / 2;
+  const cropY = (vh - cropH) / 2;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cropW;
+  canvas.height = cropH;
+  canvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+  closeCameraCapture();
+  showToast('Reading text from photo… this can take a few seconds');
+  try{
+    const text = await extractTextViaVisionApi(canvas);
+    if(!text.trim()){
+      showToast('Could not read any text from that photo');
+      return;
+    }
+    const fields = parseOcrText(text);
+    applyScannedFields(fields);
+    showToast('Filled in from photo — please check it carefully');
+  }catch(err){
+    showToast('Could not process that photo: ' + err.message);
+  }
+}
+
+async function scanAddressImageNative(source){
   try{
     const { Camera } = window.Capacitor.Plugins;
     const photo = await Camera.getPhoto({
       quality: 85,
       resultType: 'dataUrl',
-      source: 'PROMPT', // lets the user pick Camera or Gallery
+      source: source || 'PROMPT',
       saveToGallery: false
     });
     showToast('Reading text from photo… this can take a few seconds');
-    const canvas = await dataUrlToCanvas(photo.dataUrl, 1800);
+    let canvas = await dataUrlToCanvas(photo.dataUrl, 1800);
+    if(source === 'CAMERA'){
+      // Fresh photo just taken — crop to the same centered 75% region the
+      // web camera's guide box uses, to exclude background clutter.
+      canvas = cropCanvasCenter(canvas, 0.75);
+    }
     const text = await extractTextViaVisionApi(canvas);
     if(!text.trim()){
       showToast('Could not read any text from that photo');
@@ -751,7 +883,7 @@ function validateForm(){
     ['phone','Phone number'],
     ['address1','Address Line 1'],
     ['pincode','Pincode'],
-    ['weightKg','Weight']
+    ['weightGrams','Weight']
   ];
   for(const [id,label] of required){
     if(!document.getElementById(id).value.trim()){
@@ -783,7 +915,7 @@ function validateForm(){
 
 function buildPayload(){
   const settings = getSettings();
-  const weightKg = parseFloat(document.getElementById('weightKg').value) || 0.5;
+  const weightGrams = parseInt(document.getElementById('weightGrams').value, 10) || 500;
   return {
     action: 'create',
     orderId: document.getElementById('orderId').value.trim(),
@@ -791,8 +923,7 @@ function buildPayload(){
     phone: document.getElementById('phone').value.trim(),
     address: [
       document.getElementById('address1').value.trim(),
-      document.getElementById('address2').value.trim(),
-      document.getElementById('address3').value.trim()
+      document.getElementById('address2').value.trim()
     ].filter(Boolean).join(', '),
     pincode: document.getElementById('pincode').value.trim(),
     city: document.getElementById('city').value.trim(),
@@ -803,7 +934,7 @@ function buildPayload(){
     totalAmount: document.getElementById('totalAmount').value.trim(),
     productsDesc: document.getElementById('productsDesc').value.trim(),
     quantity: document.getElementById('quantity').value.trim() || '1',
-    weightGrams: Math.round(weightKg * 1000),
+    weightGrams: weightGrams,
     serviceType: document.getElementById('serviceType').value,
     shipmentLength: document.getElementById('shipLength').value.trim(),
     shipmentWidth: document.getElementById('shipWidth').value.trim(),
@@ -890,7 +1021,7 @@ function handleResult(payload, data){
     paymentMode: payload.paymentMode,
     totalAmount: payload.totalAmount,
     codAmount: payload.codAmount,
-    weightKg: (payload.weightGrams / 1000).toString(),
+    weightGrams: payload.weightGrams,
     quantity: payload.quantity,
     serviceType: payload.serviceType || 'Surface',
     waybill: data.waybill || '',
