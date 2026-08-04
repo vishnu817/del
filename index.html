@@ -86,6 +86,7 @@
     background:transparent;padding:9px 2px;font-size:16px;color:var(--text);
   }
   .underline-input:focus{outline:none;border-bottom-color:var(--accent);background:transparent;}
+  .underline-textarea{resize:vertical;line-height:1.5;white-space:pre-wrap;min-height:90px;font-family:inherit;}
 
   .chip-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
   .chip{
@@ -169,6 +170,7 @@
   <p>Delhivery Shipment Booking</p>
   <div class="tabs">
     <div class="tab active" id="tabNewBtn" onclick="showTab('new')">New Booking</div>
+    <div class="tab" id="tabRateBtn" onclick="showTab('rate')">Rate Calc</div>
     <div class="tab" id="tabHistBtn" onclick="showTab('hist')">History</div>
   </div>
 </header>
@@ -205,11 +207,8 @@
         <input class="underline-input" id="pincode" required inputmode="numeric" maxlength="6">
         <div id="pincodeStatus" class="hint"></div>
 
-        <label class="field-required underline-label">Address Line 1</label>
-        <input class="underline-input" id="address1" required placeholder="House/flat no., street">
-
-        <label class="underline-label">Address Line 2</label>
-        <input class="underline-input" id="address2" placeholder="Area, landmark">
+        <label class="field-required underline-label">Address</label>
+        <textarea class="underline-input underline-textarea" id="address" required rows="4" placeholder="House/flat no., street, area, landmark"></textarea>
 
         <label class="underline-label">State</label>
         <input class="underline-input" id="state" placeholder="Auto-fills from pincode">
@@ -288,6 +287,24 @@
   </div>
 
   <!-- HISTORY TAB -->
+  <!-- RATE CALCULATOR TAB -->
+  <div id="tabRate" style="display:none;">
+    <div class="card">
+      <h2>Estimate Shipping Cost</h2>
+      <label class="field-required underline-label">Destination Pincode</label>
+      <input class="underline-input" id="rateDestPincode" inputmode="numeric" maxlength="6" placeholder="6-digit pincode">
+      <label class="field-required underline-label">Weight (grams)</label>
+      <input class="underline-input" id="rateWeightGrams" inputmode="numeric" placeholder="e.g. 500">
+      <label class="underline-label">Service</label>
+      <select class="underline-input" id="rateServiceType">
+        <option value="Surface">Surface</option>
+        <option value="Express">Express</option>
+      </select>
+    </div>
+    <button class="primary" style="margin-bottom:14px;" onclick="calculateShippingRate()">Calculate</button>
+    <div id="rateResultBox"></div>
+  </div>
+
   <div id="tabHist" style="display:none;">
     <div class="card">
       <h2>Recent Bookings</h2>
@@ -316,6 +333,10 @@
     <label>Pickup Location Name</label>
     <input id="setPickupLocation" placeholder="Exact warehouse name registered with Delhivery">
     <div class="hint">Must match your registered warehouse name exactly (case-sensitive).</div>
+
+    <label>Origin Pincode</label>
+    <input id="setOriginPincode" inputmode="numeric" maxlength="6" placeholder="Your warehouse/pickup pincode">
+    <div class="hint">Used automatically for the Rate Calculator, so staff only enter the destination.</div>
 
     <label>Seller / Client Name</label>
     <input id="setSellerName" placeholder="e.g. Sri Krishna Traders">
@@ -377,6 +398,7 @@ const DELHIVERY_LOGO_DEFAULT = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAi
 const DEFAULT_SETTINGS = {
   appsScriptUrl: 'PASTE_YOUR_APPS_SCRIPT_EXEC_URL_HERE',
   pickupLocation: 'PASTE_YOUR_DELHIVERY_PICKUP_LOCATION_NAME',
+  originPincode: '',
   sellerName: 'Sri Krishna Traders',
   sellerAddress: 'PASTE_YOUR_WAREHOUSE_ADDRESS_HERE',
   sellerGst: 'PASTE_YOUR_GSTIN_HERE',
@@ -485,10 +507,8 @@ function resizeImageToCanvas(file, maxDim){
 function applyScannedFields(fields){
   if(fields.name && !document.getElementById('consigneeName').value.trim()) document.getElementById('consigneeName').value = fields.name;
   if(fields.phone && !document.getElementById('phone').value.trim()) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
-  if(fields.address && !document.getElementById('address1').value.trim()){
-    const parts = fields.address.split(',').map(s => s.trim()).filter(Boolean);
-    document.getElementById('address1').value = parts[0] || '';
-    document.getElementById('address2').value = parts.slice(1).join(', ');
+  if(fields.address && !document.getElementById('address').value.trim()){
+    document.getElementById('address').value = fields.address;
   }
   if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
   if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
@@ -531,19 +551,37 @@ function parseOcrText(text){
     if(tok !== phone){ pincode = tok; break; }
   }
 
-  // Crude split: first line as name, remaining lines joined as address —
-  // except any line that's essentially just the phone number or pincode we
-  // already pulled out above (e.g. "Ph: 98765 43210", "PIN: 500064"),
-  // so those don't get duplicated into the address text too.
-  const name = lines.length ? lines[0] : '';
-  const addressLines = lines.slice(1).filter(line => {
+  // Skip pure label lines (e.g. "To:", "Ship To", "Deliver To") when picking
+  // the name — those are envelope/label boilerplate, not the actual name.
+  const nameLabels = ['to', 'ship to', 'deliver to', 'consignee', 'receiver', 'name'];
+  const isLabelOnly = (line) => nameLabels.includes(line.replace(/[:\-]/g, '').trim().toLowerCase());
+  const stripLeadingLabel = (line) => {
+    for(const label of nameLabels){
+      const re = new RegExp('^' + label.replace(/ /g, '\\s+') + '\\s*[:\\-]\\s*', 'i');
+      if(re.test(line)) return line.replace(re, '').trim();
+    }
+    return line;
+  };
+
+  let nameIndex = 0;
+  while(nameIndex < lines.length && isLabelOnly(lines[nameIndex])){
+    nameIndex++;
+  }
+  const name = stripLeadingLabel(lines[nameIndex] || '');
+
+  // Remaining lines become the address — except any line that's essentially
+  // just the phone number or pincode we already pulled out above (e.g.
+  // "Ph: 98765 43210", "PIN: 500064"), so those aren't duplicated into it,
+  // and any other stray label-only lines.
+  const addressLines = lines.slice(nameIndex + 1).filter(line => {
+    if(isLabelOnly(line)) return false;
     const lineDigits = line.replace(/\D/g, '');
     if(!lineDigits) return true; // no digits at all — definitely address text, keep it
     if(phone && lineDigits.endsWith(phone)) return false;
     if(pincode && lineDigits === pincode) return false;
     return true;
   });
-  const address = addressLines.join(', ');
+  const address = addressLines.join('\n');
 
   return { name, phone, address, city: '', state: '', pincode };
 }
@@ -779,11 +817,34 @@ if(!pinIsConfigured() || isUnlocked()){
 
 function showTab(tab){
   document.getElementById('tabNew').style.display = tab==='new' ? 'block' : 'none';
+  document.getElementById('tabRate').style.display = tab==='rate' ? 'block' : 'none';
   document.getElementById('tabHist').style.display = tab==='hist' ? 'block' : 'none';
   document.getElementById('tabNewBtn').classList.toggle('active', tab==='new');
+  document.getElementById('tabRateBtn').classList.toggle('active', tab==='rate');
   document.getElementById('tabHistBtn').classList.toggle('active', tab==='hist');
   document.getElementById('ctaBar').style.display = tab==='new' ? 'block' : 'none';
-  if(tab==='hist') renderHistory();
+  if(tab==='hist') loadSharedHistory();
+}
+
+async function loadSharedHistory(){
+  const list = document.getElementById('historyList');
+  list.innerHTML = '<div class="empty">Loading shared history…</div>';
+  const settings = getSettings();
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+    renderHistory(); // fall back to whatever's cached locally
+    return;
+  }
+  try{
+    const data = await jsonpRequest('fetchHistory', { limit: 200 }, 15000);
+    if(data.success){
+      saveHistory(data.entries || []);
+    } else {
+      showToast(data.error || 'Could not load shared history — showing local copy');
+    }
+  }catch(err){
+    showToast('Could not reach server — showing local copy');
+  }
+  renderHistory();
 }
 
 function setPayMode(mode){
@@ -815,6 +876,7 @@ function openSettings(){
   const s = getSettings();
   document.getElementById('setAppsScriptUrl').value = s.appsScriptUrl || '';
   document.getElementById('setPickupLocation').value = s.pickupLocation || '';
+  document.getElementById('setOriginPincode').value = s.originPincode || '';
   document.getElementById('setSellerName').value = s.sellerName || '';
   document.getElementById('setSellerAddress').value = s.sellerAddress || '';
   document.getElementById('setSellerGst').value = s.sellerGst || '';
@@ -861,6 +923,7 @@ function saveSettings(){
   const s = {
     appsScriptUrl: document.getElementById('setAppsScriptUrl').value.trim(),
     pickupLocation: document.getElementById('setPickupLocation').value.trim(),
+    originPincode: document.getElementById('setOriginPincode').value.trim(),
     sellerName: document.getElementById('setSellerName').value.trim(),
     sellerAddress: document.getElementById('setSellerAddress').value.trim(),
     sellerGst: document.getElementById('setSellerGst').value.trim(),
@@ -881,7 +944,7 @@ function validateForm(){
   const required = [
     ['consigneeName','Consignee name'],
     ['phone','Phone number'],
-    ['address1','Address Line 1'],
+    ['address','Address'],
     ['pincode','Pincode'],
     ['weightGrams','Weight']
   ];
@@ -921,10 +984,7 @@ function buildPayload(){
     orderId: document.getElementById('orderId').value.trim(),
     consigneeName: document.getElementById('consigneeName').value.trim(),
     phone: document.getElementById('phone').value.trim(),
-    address: [
-      document.getElementById('address1').value.trim(),
-      document.getElementById('address2').value.trim()
-    ].filter(Boolean).join(', '),
+    address: document.getElementById('address').value.trim().replace(/\n+/g, ', '),
     pincode: document.getElementById('pincode').value.trim(),
     city: document.getElementById('city').value.trim(),
     state: document.getElementById('state').value.trim(),
@@ -1045,6 +1105,7 @@ function handleResult(payload, data){
           <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print to App</button>
         </div>
         <div class="actions">
+          <button class="ghost" onclick="openTracking('${escapeAttr(data.waybill)}')">Track</button>
           <button class="ghost" onclick="shareWhatsApp('${escapeAttr(entry.orderId)}')">Share</button>
           <button class="ghost" onclick="startNewBooking()">New Booking</button>
         </div>
@@ -1072,6 +1133,78 @@ function startNewBooking(){
   document.getElementById('orderId').value = generateOrderId();
 }
 
+async function calculateShippingRate(){
+  const destPin = document.getElementById('rateDestPincode').value.trim();
+  const weightGrams = document.getElementById('rateWeightGrams').value.trim();
+  const serviceType = document.getElementById('rateServiceType').value;
+  const settings = getSettings();
+  const resultBox = document.getElementById('rateResultBox');
+
+  if(destPin.length !== 6){
+    showToast('Enter a valid 6-digit destination pincode');
+    return;
+  }
+  if(!weightGrams){
+    showToast('Enter the weight in grams');
+    return;
+  }
+  if(!settings.originPincode){
+    showToast('Set your Origin Pincode in Settings first');
+    openSettings();
+    return;
+  }
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+    showToast('Set up your Apps Script URL in Settings first');
+    return;
+  }
+
+  resultBox.innerHTML = '<div class="card"><div class="hint">Calculating…</div></div>';
+
+  try{
+    const data = await jsonpRequest('rateCalc', {
+      oPin: settings.originPincode,
+      dPin: destPin,
+      weightGrams: weightGrams,
+      mode: serviceType
+    }, 20000);
+
+    if(!data.success){
+      resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(data.error || 'Unknown error')}</div></div>`;
+      return;
+    }
+
+    // Delhivery's exact response field names aren't publicly documented, so
+    // try common candidates for the headline total, and always show the full
+    // raw response too so nothing is hidden if our guess doesn't match.
+    const raw = data.raw;
+    const flat = Array.isArray(raw) ? (raw[0] || {}) : raw;
+    const totalCandidates = ['total_amount', 'gross_amount', 'total', 'chargeable_amount'];
+    let total = null;
+    for(const key of totalCandidates){
+      if(flat && flat[key] !== undefined && flat[key] !== null){ total = flat[key]; break; }
+    }
+
+    resultBox.innerHTML = `
+      <div class="result ok">
+        ${total !== null ? `<div class="wb">₹${escapeHtml(total)}</div><div class="hint">Approximate charge — Delhivery's actual invoice amount may vary slightly</div>` : `<div class="hint">Calculated — see full response below (couldn't identify a single total field, so showing everything Delhivery returned)</div>`}
+        <div class="hint" style="margin-top:8px;">${escapeHtml(destPin)} · ${escapeHtml(weightGrams)}g · ${escapeHtml(serviceType)}</div>
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full response</summary>
+          <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(raw, null, 2))}</pre>
+        </details>
+      </div>`;
+  }catch(err){
+    resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(err.message || 'Unknown error')}</div></div>`;
+  }
+}
+
+function trackingUrl(waybill){
+  return 'https://www.delhivery.com/track-v2/package/' + encodeURIComponent(waybill);
+}
+function openTracking(waybill){
+  window.open(trackingUrl(waybill), '_blank');
+}
+
 function renderHistory(){
   const hist = getHistory();
   const list = document.getElementById('historyList');
@@ -1087,7 +1220,7 @@ function renderHistory(){
       </div>
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
-      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions"><button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="openTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
     </div>
   `).join('');
 }
@@ -1100,7 +1233,7 @@ function shareWhatsApp(orderId){
     `Consignee: ${encodeURIComponent(entry.consigneeName)}%0A` +
     `Order ID: ${encodeURIComponent(entry.orderId)}%0A` +
     `AWB / Tracking No: ${encodeURIComponent(entry.waybill)}%0A` +
-    `Track at: delhivery.com/tracking`;
+    `Track here: ${encodeURIComponent(trackingUrl(entry.waybill))}`;
   window.open(`https://wa.me/?text=${msg}`, '_blank');
 }
 
@@ -1159,6 +1292,7 @@ async function fetchAndAttachDestInfo(orderId){
         || data.matches[0];
       entry.destinationOffice = String(preferred.value);
       saveHistory(hist);
+      jsonpRequest('updateDestOffice', { orderId: entry.orderId, destinationOffice: entry.destinationOffice }).catch(() => {});
     }
   }catch(err){
     // Non-critical enhancement — fail silently, label just won't show this line
