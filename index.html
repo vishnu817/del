@@ -86,7 +86,7 @@
     background:transparent;padding:9px 2px;font-size:16px;color:var(--text);
   }
   .underline-input:focus{outline:none;border-bottom-color:var(--accent);background:transparent;}
-  .underline-textarea{resize:vertical;line-height:1.5;white-space:pre-wrap;min-height:90px;font-family:inherit;}
+  .underline-textarea{resize:none;line-height:1.45;white-space:pre-wrap;min-height:78px;max-height:78px;font-family:inherit;font-size:13px;overflow-y:auto;}
 
   .chip-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
   .chip{
@@ -320,6 +320,15 @@
   </div>
 </div>
 
+<!-- TRACKING MODAL -->
+<div class="modal-overlay" id="trackingOverlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeTrackingModal()">&times;</button>
+    <h2>Tracking</h2>
+    <div id="trackingContent"><p class="hint">Loading…</p></div>
+  </div>
+</div>
+
 <!-- SETTINGS MODAL -->
 <div class="modal-overlay" id="settingsOverlay">
   <div class="modal">
@@ -380,6 +389,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 const LS_SETTINGS = 'skl_delhivery_settings';
@@ -1093,6 +1103,14 @@ function handleResult(payload, data){
   hist.unshift(entry);
   saveHistory(hist);
 
+  const debugHtml = `
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Debug: what was sent to Delhivery</summary>
+      <pre style="white-space:pre-wrap;font-size:10.5px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(data.debugPayload, null, 2))}</pre>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px;">Delhivery's raw response:</div>
+      <pre style="white-space:pre-wrap;font-size:10.5px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:4px;">${escapeHtml(JSON.stringify(data.raw, null, 2))}</pre>
+    </details>`;
+
   if(data.success && data.waybill){
     fetchAndAttachDestInfo(entry.orderId);
     box.innerHTML = `
@@ -1105,10 +1123,11 @@ function handleResult(payload, data){
           <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print to App</button>
         </div>
         <div class="actions">
-          <button class="ghost" onclick="openTracking('${escapeAttr(data.waybill)}')">Track</button>
+          <button class="ghost" onclick="showInternalTracking('${escapeAttr(data.waybill)}')">Track</button>
           <button class="ghost" onclick="shareWhatsApp('${escapeAttr(entry.orderId)}')">Share</button>
           <button class="ghost" onclick="startNewBooking()">New Booking</button>
         </div>
+        ${debugHtml}
       </div>`;
     showToast('Shipment created');
   } else {
@@ -1119,6 +1138,7 @@ function handleResult(payload, data){
         <div class="actions">
           <button class="ghost" onclick="submitBooking()">Retry</button>
         </div>
+        ${debugHtml}
       </div>`;
     showToast('Booking failed — see details above');
   }
@@ -1204,6 +1224,57 @@ function trackingUrl(waybill){
 function openTracking(waybill){
   window.open(trackingUrl(waybill), '_blank');
 }
+function closeTrackingModal(){
+  document.getElementById('trackingOverlay').classList.remove('show');
+}
+
+async function showInternalTracking(waybill){
+  if(!waybill){
+    showToast('No AWB available for this order yet');
+    return;
+  }
+  document.getElementById('trackingOverlay').classList.add('show');
+  const content = document.getElementById('trackingContent');
+  content.innerHTML = '<p class="hint">Loading tracking info…</p>';
+
+  try{
+    const data = await jsonpRequest('trackShipment', { waybill }, 15000);
+    if(!data.success){
+      content.innerHTML = `
+        <p class="hint">${escapeHtml(data.error || 'Could not fetch tracking')}</p>
+        <button class="ghost" style="width:100%;margin-top:10px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+      return;
+    }
+    const shipment = data.shipment || {};
+    const scans = shipment.scans || [];
+    const scansHtml = scans.length ? `
+      <div style="margin-top:14px;max-height:260px;overflow-y:auto;">
+        ${scans.map(s => `
+          <div style="border-bottom:1px solid var(--line);padding:8px 0;font-size:12.5px;">
+            <div style="font-weight:700;">${escapeHtml(s.status || '')}</div>
+            <div class="hint">${escapeHtml(s.location || '')}${s.date ? ' · ' + escapeHtml(s.date) : ''}</div>
+          </div>
+        `).join('')}
+      </div>` : '';
+
+    content.innerHTML = `
+      <div style="text-align:center;padding:8px 0 4px;">
+        <div style="font-size:20px;font-weight:800;color:var(--navy);">${escapeHtml(shipment.status || 'Unknown')}</div>
+        <div class="hint">AWB ${escapeHtml(waybill)}${shipment.statusLocation ? ' · ' + escapeHtml(shipment.statusLocation) : ''}</div>
+        ${shipment.statusDateTime ? `<div class="hint">${escapeHtml(shipment.statusDateTime)}</div>` : ''}
+      </div>
+      ${scansHtml}
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full response</summary>
+        <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(shipment.raw, null, 2))}</pre>
+      </details>
+      <button class="ghost" style="width:100%;margin-top:14px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+  }catch(err){
+    content.innerHTML = `
+      <p class="hint">${escapeHtml(err.message || 'Could not fetch tracking')}</p>
+      <button class="ghost" style="width:100%;margin-top:10px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+  }
+}
 
 function renderHistory(){
   const hist = getHistory();
@@ -1220,7 +1291,7 @@ function renderHistory(){
       </div>
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
-      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="openTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="showInternalTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
     </div>
   `).join('');
 }
@@ -1280,17 +1351,42 @@ function base64ToBlob(base64, mime){
   return new Blob([new Uint8Array(byteNumbers)], { type: mime });
 }
 
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
 async function fetchAndAttachDestInfo(orderId){
   try{
     const hist = getHistory();
     const entry = hist.find(h => h.orderId === orderId);
     if(!entry || !entry.waybill) return;
-    const data = await jsonpRequest('destInfo', { waybill: entry.waybill });
-    if(data.success && data.matches && data.matches.length){
-      const preferred = data.matches.find(m => m.key.toLowerCase().indexOf('sort') !== -1)
-        || data.matches.find(m => m.key.toLowerCase().indexOf('facility') !== -1)
-        || data.matches[0];
-      entry.destinationOffice = String(preferred.value);
+
+    // Pull Delhivery's own official label PDF and read the destination
+    // station/facility line directly out of its actual text — this is what
+    // genuinely appears on their real label (e.g. "Kolkata_Jorasanko1_D
+    // (West Bengal)"), which is far more reliable than guessing at JSON
+    // field names from the packing_slip API's response shape.
+    const data = await jsonpRequest('officialLabel', { waybill: entry.waybill }, 45000);
+    if(!data.success || !data.pdfBase64) return;
+
+    const binary = atob(data.pdfBase64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++){ bytes[i] = binary.charCodeAt(i); }
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const page = await pdf.getPage(1);
+    const textContent = await page.getTextContent();
+    const text = textContent.items.map(item => item.str).join(' ');
+
+    // Looks for the "City_Facility_Code (State)" pattern Delhivery prints
+    // on the real label, e.g. "Raygada_GandhiNgr_DPP (Orissa)". PDF text
+    // extraction can introduce stray spacing around punctuation, so the
+    // pattern tolerates that and the result is cleaned up afterward.
+    const match = text.match(/\b([A-Za-z0-9]+(?:\s*_\s*[A-Za-z0-9]+){1,4})\s*\(\s*([A-Za-z .]+?)\s*\)/);
+    if(match){
+      const facility = match[1].replace(/\s*_\s*/g, '_').trim();
+      const state = match[2].trim();
+      entry.destinationOffice = `${facility} (${state})`;
       saveHistory(hist);
       jsonpRequest('updateDestOffice', { orderId: entry.orderId, destinationOffice: entry.destinationOffice }).catch(() => {});
     }
@@ -1379,9 +1475,10 @@ function buildLabelDocumentHtml(entry, settings, autoPrint){
   .pincode-row .svc{width:26mm;border-left:1.4px solid #000;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-align:center;}
 
   .body-row{display:flex;flex:1;}
-  .addr{flex:1;padding:2mm 2.5mm;font-size:11px;line-height:1.42;}
+  .addr{flex:1;padding:2mm 2.5mm;font-size:10.5px;line-height:1.38;overflow:hidden;word-wrap:break-word;overflow-wrap:break-word;}
   .addr .hdr{font-weight:700;font-size:11px;}
-  .addr .name{font-weight:700;font-size:14px;margin:0.5mm 0 1mm;}
+  .addr .name{font-weight:700;font-size:13px;margin:0.5mm 0 1mm;word-wrap:break-word;overflow-wrap:break-word;}
+  .addr .addr-text{word-wrap:break-word;overflow-wrap:break-word;}
   .addr .pinline{font-weight:700;margin-top:1mm;}
   .side{width:24mm;border-left:1.4px solid #000;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:13px;line-height:1.5;}
   .side .amt{font-size:15px;margin-top:2mm;}
@@ -1411,7 +1508,7 @@ function buildLabelDocumentHtml(entry, settings, autoPrint){
       <div class="addr">
         <div class="hdr">Ship To:</div>
         <div class="name">${escapeHtml(entry.consigneeName)}</div>
-        <div>${escapeHtml(entry.address || '')}</div>
+        <div class="addr-text">${escapeHtml(entry.address || '')}</div>
         <div>${escapeHtml(entry.city || '')}${entry.city ? ', ' : ''}${escapeHtml(entry.state || '')}</div>
         <div>Ph: ${escapeHtml(entry.phone || '')}</div>
         <div class="pinline">PIN: ${escapeHtml(entry.pincode || '')}</div>
@@ -1577,6 +1674,15 @@ async function shareLabelToPrinterApp(orderId){
 
 // Init
 document.getElementById('orderId').value = generateOrderId();
+document.getElementById('address').addEventListener('input', function(){
+  const lines = this.value.split('\n');
+  if(lines.length > 4){
+    const cursorAtEnd = this.selectionStart === this.value.length;
+    this.value = lines.slice(0, 4).join('\n');
+    if(cursorAtEnd) this.selectionStart = this.selectionEnd = this.value.length;
+  }
+});
+
 document.getElementById('pincode').addEventListener('input', function(){
   this.value = this.value.replace(/\D/g,'').slice(0,6);
   document.getElementById('pincodeStatus').textContent = '';
