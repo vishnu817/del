@@ -86,7 +86,7 @@
     background:transparent;padding:9px 2px;font-size:16px;color:var(--text);
   }
   .underline-input:focus{outline:none;border-bottom-color:var(--accent);background:transparent;}
-  .underline-textarea{resize:none;line-height:1.45;white-space:pre-wrap;min-height:78px;max-height:78px;font-family:inherit;font-size:13px;overflow-y:auto;}
+  .underline-textarea{resize:none;line-height:1.45;white-space:pre-wrap;min-height:118px;max-height:118px;font-family:inherit;font-size:13px;overflow-y:auto;}
 
   .chip-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;}
   .chip{
@@ -518,7 +518,9 @@ function applyScannedFields(fields){
   if(fields.name && !document.getElementById('consigneeName').value.trim()) document.getElementById('consigneeName').value = fields.name;
   if(fields.phone && !document.getElementById('phone').value.trim()) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
   if(fields.address && !document.getElementById('address').value.trim()){
-    document.getElementById('address').value = fields.address;
+    const addrEl = document.getElementById('address');
+    addrEl.value = fields.address.split('\n').slice(0, 6).join('\n');
+    addrEl.scrollTop = 0;
   }
   if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
   if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
@@ -1676,11 +1678,12 @@ async function shareLabelToPrinterApp(orderId){
 document.getElementById('orderId').value = generateOrderId();
 document.getElementById('address').addEventListener('input', function(){
   const lines = this.value.split('\n');
-  if(lines.length > 4){
+  if(lines.length > 6){
     const cursorAtEnd = this.selectionStart === this.value.length;
-    this.value = lines.slice(0, 4).join('\n');
+    this.value = lines.slice(0, 6).join('\n');
     if(cursorAtEnd) this.selectionStart = this.selectionEnd = this.value.length;
   }
+  this.scrollTop = 0; // show from the top instead of leaving it scrolled to wherever the cursor landed
 });
 
 document.getElementById('pincode').addEventListener('input', function(){
