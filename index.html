@@ -1219,7 +1219,9 @@ async function calculateShippingRate(){
 
     // Best-effort transit time — scan both responses, since it's not
     // confirmed which endpoint (if either) actually carries this field.
-    const tatSource = (pinData.tatMatches && pinData.tatMatches.length) ? pinData.tatMatches[0] : null;
+    const tatSource = (rateData.tatMatches && rateData.tatMatches.length) ? rateData.tatMatches[0]
+      : (pinData.tatMatches && pinData.tatMatches.length) ? pinData.tatMatches[0]
+      : null;
     const tatHtml = tatSource
       ? `<div class="hint" style="margin-top:4px;">Transit time (best guess — field "${escapeHtml(tatSource.key)}"): <strong>${escapeHtml(tatSource.value)}</strong></div>`
       : `<div class="hint" style="margin-top:4px;">Transit time: not available from Delhivery's response for this pincode</div>`;
