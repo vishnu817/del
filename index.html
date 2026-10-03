@@ -1183,22 +1183,20 @@ async function calculateShippingRate(){
   resultBox.innerHTML = '<div class="card"><div class="hint">Calculating…</div></div>';
 
   try{
-    const data = await jsonpRequest('rateCalc', {
-      oPin: settings.originPincode,
-      dPin: destPin,
-      weightGrams: weightGrams,
-      mode: serviceType
-    }, 20000);
+    const [rateData, pinData] = await Promise.all([
+      jsonpRequest('rateCalc', { oPin: settings.originPincode, dPin: destPin, weightGrams: weightGrams, mode: serviceType }, 20000),
+      jsonpRequest('pincode', { pincode: destPin }, 15000).catch(() => ({ success: false, error: 'Could not check serviceability' }))
+    ]);
 
-    if(!data.success){
-      resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(data.error || 'Unknown error')}</div></div>`;
+    if(!rateData.success){
+      resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(rateData.error || 'Unknown error')}</div></div>`;
       return;
     }
 
     // Delhivery's exact response field names aren't publicly documented, so
     // try common candidates for the headline total, and always show the full
     // raw response too so nothing is hidden if our guess doesn't match.
-    const raw = data.raw;
+    const raw = rateData.raw;
     const flat = Array.isArray(raw) ? (raw[0] || {}) : raw;
     const totalCandidates = ['total_amount', 'gross_amount', 'total', 'chargeable_amount'];
     let total = null;
@@ -1206,14 +1204,42 @@ async function calculateShippingRate(){
       if(flat && flat[key] !== undefined && flat[key] !== null){ total = flat[key]; break; }
     }
 
+    // Serviceability block
+    let serviceabilityHtml = '';
+    if(pinData.success){
+      const bits = [];
+      if(pinData.prepaid) bits.push('Prepaid ✓');
+      if(pinData.cod) bits.push('COD ✓');
+      if(pinData.isOda) bits.push('ODA area');
+      serviceabilityHtml = `<div style="color:var(--ok);font-weight:700;font-size:13px;">Serviceable${pinData.city ? ' — ' + escapeHtml(pinData.city) : ''}</div>
+        ${bits.length ? `<div class="hint">${escapeHtml(bits.join(', '))}</div>` : ''}`;
+    } else {
+      serviceabilityHtml = `<div style="color:var(--err);font-weight:700;font-size:13px;">${escapeHtml(pinData.error || 'Not serviceable')}</div>`;
+    }
+
+    // Best-effort transit time — scan both responses, since it's not
+    // confirmed which endpoint (if either) actually carries this field.
+    const tatSource = (pinData.tatMatches && pinData.tatMatches.length) ? pinData.tatMatches[0] : null;
+    const tatHtml = tatSource
+      ? `<div class="hint" style="margin-top:4px;">Transit time (best guess — field "${escapeHtml(tatSource.key)}"): <strong>${escapeHtml(tatSource.value)}</strong></div>`
+      : `<div class="hint" style="margin-top:4px;">Transit time: not available from Delhivery's response for this pincode</div>`;
+
     resultBox.innerHTML = `
       <div class="result ok">
         ${total !== null ? `<div class="wb">₹${escapeHtml(total)}</div><div class="hint">Approximate charge — Delhivery's actual invoice amount may vary slightly</div>` : `<div class="hint">Calculated — see full response below (couldn't identify a single total field, so showing everything Delhivery returned)</div>`}
         <div class="hint" style="margin-top:8px;">${escapeHtml(destPin)} · ${escapeHtml(weightGrams)}g · ${escapeHtml(serviceType)}</div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
+          ${serviceabilityHtml}
+          ${tatHtml}
+        </div>
         <details style="margin-top:10px;">
-          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full response</summary>
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full rate response</summary>
           <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(raw, null, 2))}</pre>
         </details>
+        ${pinData.success ? `<details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full serviceability response</summary>
+          <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(pinData.raw, null, 2))}</pre>
+        </details>` : ''}
       </div>`;
   }catch(err){
     resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(err.message || 'Unknown error')}</div></div>`;
