@@ -194,7 +194,8 @@
       <div class="card">
         <h2>Consignee</h2>
         <button type="button" class="ghost" style="width:100%;margin-bottom:8px;" onclick="triggerScanAddress()">Scan Address from Photo</button>
-        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;font-size:12px;" onclick="triggerGalleryPick()">Choose from Gallery instead</button>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:8px;font-size:12px;" onclick="triggerGalleryPick()">Choose from Gallery instead</button>
+        <button type="button" class="ghost" style="width:100%;margin-bottom:12px;" onclick="openPasteAddress()">Paste Address Text</button>
         <input type="file" id="scanAddressInput" accept="image/*" capture="environment" style="display:none;">
 
         <label class="field-required underline-label">Receiver Name</label>
@@ -317,6 +318,20 @@
 <div class="cta-bar" id="ctaBar">
   <div class="wrap">
     <button class="primary" id="submitBtn" onclick="submitBooking()">Create Shipment</button>
+  </div>
+</div>
+
+<!-- PASTE ADDRESS MODAL -->
+<div class="modal-overlay" id="pasteAddressOverlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closePasteAddress()">&times;</button>
+    <h2>Paste Address Text</h2>
+    <div class="hint" style="margin-bottom:8px;">Paste an address message (WhatsApp, SMS…). Name, phone, pincode and address are filled in automatically.</div>
+    <textarea id="pasteAddressText" rows="7" style="width:100%;font-size:14px;" placeholder="e.g. Ravi Kumar&#10;9876543210&#10;H.No 1-2-3, Banjara Hills&#10;Hyderabad 500034"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button type="button" class="ghost" style="flex:1;" onclick="pasteFromClipboard()">Paste from Clipboard</button>
+      <button type="button" class="primary" style="flex:1;" onclick="applyPastedAddress()">Fill Fields</button>
+    </div>
   </div>
 </div>
 
@@ -514,17 +529,18 @@ function resizeImageToCanvas(file, maxDim){
   });
 }
 
-function applyScannedFields(fields){
-  if(fields.name && !document.getElementById('consigneeName').value.trim()) document.getElementById('consigneeName').value = fields.name;
-  if(fields.phone && !document.getElementById('phone').value.trim()) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
-  if(fields.address && !document.getElementById('address').value.trim()){
+function applyScannedFields(fields, overwrite){
+  const canSet = (id) => overwrite || !document.getElementById(id).value.trim();
+  if(fields.name && canSet('consigneeName')) document.getElementById('consigneeName').value = fields.name;
+  if(fields.phone && canSet('phone')) document.getElementById('phone').value = fields.phone.replace(/\D/g,'').slice(0,10);
+  if(fields.address && canSet('address')){
     const addrEl = document.getElementById('address');
     addrEl.value = fields.address.split('\n').slice(0, 6).join('\n');
     addrEl.scrollTop = 0;
   }
-  if(fields.city && !document.getElementById('city').value.trim()) document.getElementById('city').value = fields.city;
-  if(fields.state && !document.getElementById('state').value.trim()) document.getElementById('state').value = fields.state;
-  if(fields.pincode && !document.getElementById('pincode').value.trim()){
+  if(fields.city && canSet('city')) document.getElementById('city').value = fields.city;
+  if(fields.state && canSet('state')) document.getElementById('state').value = fields.state;
+  if(fields.pincode && canSet('pincode')){
     const pin = fields.pincode.replace(/\D/g,'').slice(0,6);
     document.getElementById('pincode').value = pin;
     if(pin.length === 6) checkPincodeUI(pin);
@@ -596,6 +612,109 @@ function parseOcrText(text){
   const address = addressLines.join('\n');
 
   return { name, phone, address, city: '', state: '', pincode };
+}
+
+// Parses a pasted address message (WhatsApp/SMS style) into fields. Handles
+// labelled messages ("Name: .. Mobile: .. Address: .. Pin: ..") on one or many
+// lines, plain multi-line messages, and single-line comma-separated ones.
+function parseAddressMessage(text){
+  let t = String(text || '').replace(/\r/g, '');
+  const LABELS = 'name|consignee|receiver|ship\\s*to|deliver\\s*to|to|mobile|mob|phone|ph|contact|cell|whatsapp|pin\\s*code|pincode|pin|address|addr';
+  const INLINE = 'name|consignee|receiver|mobile|mob|phone|ph|contact|cell|whatsapp|pin\\s*code|pincode|pin|address|addr';
+  // Break "Name: X Mobile: Y Address: Z" run together on one line into lines
+  t = t.replace(new RegExp('[ \\t]+(?=(?:' + INLINE + ')\\s*(?:no\\.?|number)?\\s*[:\\-\u2013]\\s*\\S)', 'gi'), '\n');
+
+  let lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+  if(lines.length === 1 && /[,;|]/.test(lines[0])){
+    lines = lines[0].split(/\s*[,;|]\s*/).filter(Boolean);
+  }
+
+  const base = parseOcrText(lines.join('\n'));
+  const phone = base.phone;
+  const pincode = base.pincode;
+
+  const lblRe = new RegExp('^(' + LABELS + ')\\s*(?:no\\.?|number)?\\s*[:\\-\u2013]\\s*(.*)$', 'i');
+  let labelledName = '';
+  const addrLines = [];
+  const rest = [];
+  let inAddr = false;
+  for(const line of lines){
+    const m = line.match(lblRe);
+    if(m){
+      const key = m[1].toLowerCase().replace(/\s+/g, '');
+      const val = m[2].trim();
+      inAddr = false;
+      if(/^(name|consignee|receiver|shipto|deliverto|to)$/.test(key)){ if(val) labelledName = val; }
+      else if(/^(address|addr)$/.test(key)){ if(val) addrLines.push(val); inAddr = true; }
+      // phone / pin labelled lines are already captured by parseOcrText above
+    } else if(inAddr){
+      addrLines.push(line);
+    } else {
+      rest.push(line);
+    }
+  }
+
+  const clean = (line) => {
+    let l = line;
+    if(pincode) l = l.replace(pincode, '');
+    if(phone){
+      // remove the phone number even if written with spaces/hyphens/+91
+      const loose = phone.split('').join('[\\s-]*');
+      l = l.replace(new RegExp('(?:\\+?91[\\s-]*)?0?' + loose), '');
+    }
+    l = l.replace(/\b(pin\s*code|pincode|pin|mobile|mob|phone|ph|contact|cell|whatsapp)\s*(?:no\\.?|number)?\s*[:\-]?\s*$/i, '').replace(/[\s,\-:]+$/, '').replace(/^[\s,\-:]+/, '').trim();
+    return l;
+  };
+  const keep = (line) => /[A-Za-z0-9]/.test(clean(line));
+
+  let name = labelledName;
+  let restForAddress = rest;
+  if(!name){
+    const o = parseOcrText(rest.join('\n'));
+    name = o.name;
+    restForAddress = rest.slice(rest.findIndex(l => l.indexOf(o.name) !== -1 || o.name.indexOf(l) !== -1) + 1);
+    if(!o.name) restForAddress = rest;
+  }
+  // Name and phone run together on one line ("Kiran 9000011111 Plot 7 ...")
+  if(phone && name){
+    const loose = new RegExp('(?:\\+?91[\\s-]*)?0?' + phone.split('').join('[\\s-]*'));
+    const pm = name.match(loose);
+    if(pm){
+      const before = name.slice(0, pm.index).trim();
+      const after = name.slice(pm.index + pm[0].length).trim();
+      if(before){ name = before; if(after) restForAddress = [after].concat(restForAddress); }
+    }
+  }
+  const addressSource = addrLines.length ? addrLines.concat(restForAddress) : restForAddress;
+  const address = addressSource.map(clean).filter(l => /[A-Za-z0-9]/.test(l)).join('\n');
+
+  return { name: (name || '').trim(), phone, pincode, address, city: '', state: '' };
+}
+
+function openPasteAddress(){
+  document.getElementById('pasteAddressText').value = '';
+  document.getElementById('pasteAddressOverlay').classList.add('show');
+  setTimeout(() => document.getElementById('pasteAddressText').focus(), 50);
+}
+function closePasteAddress(){
+  document.getElementById('pasteAddressOverlay').classList.remove('show');
+}
+async function pasteFromClipboard(){
+  try{
+    const txt = await navigator.clipboard.readText();
+    if(txt) document.getElementById('pasteAddressText').value = txt;
+    else showToast('Clipboard is empty');
+  }catch(err){
+    showToast('Could not read clipboard — long-press in the box and choose Paste');
+  }
+}
+function applyPastedAddress(){
+  const text = document.getElementById('pasteAddressText').value;
+  if(!text.trim()){ showToast('Paste the address message first'); return; }
+  const fields = parseAddressMessage(text);
+  applyScannedFields(fields, true);
+  closePasteAddress();
+  showToast('Filled from pasted text — please check it');
 }
 
 async function extractTextViaVisionApi(canvas){
