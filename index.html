@@ -964,4 +964,955 @@ function setPayMode(mode){
 }
 
 function toggleAdvanced(){
-  co
+  const el = document.getElementById('advancedSection');
+  const open = el.classList.toggle('open');
+  document.getElementById('advToggleLabel').textContent = open ? '- Dimensions & invoice details' : '+ Dimensions & invoice details';
+}
+
+function generateOrderId(){
+  const s = getSettings();
+  const prefix = s.orderPrefix || 'SKD';
+  const now = new Date();
+  const yy = String(now.getFullYear()).slice(-2);
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
+  const hist = getHistory();
+  const todayCount = hist.filter(h => h.orderId && h.orderId.startsWith(prefix+'-'+yy+mm+dd)).length + 1;
+  return `${prefix}-${yy}${mm}${dd}-${String(todayCount).padStart(2,'0')}`;
+}
+
+function openSettings(){
+  const s = getSettings();
+  document.getElementById('setAppsScriptUrl').value = s.appsScriptUrl || '';
+  document.getElementById('setPickupLocation').value = s.pickupLocation || '';
+  document.getElementById('setOriginPincode').value = s.originPincode || '';
+  document.getElementById('setSellerName').value = s.sellerName || '';
+  document.getElementById('setSellerAddress').value = s.sellerAddress || '';
+  document.getElementById('setSellerGst').value = s.sellerGst || '';
+  document.getElementById('setHsnCode').value = s.hsnCode || '';
+  document.getElementById('setOrderPrefix').value = s.orderPrefix || 'SKD';
+  document.getElementById('setLabelCropPercent').value = s.officialLabelCropPercent || 25;
+  pendingSkLogo = s.skLogoBase64 || '';
+  pendingDelhiveryLogo = s.delhiveryLogoBase64 || '';
+  renderLogoPreview('skLogoPreview', pendingSkLogo);
+  renderLogoPreview('delhiveryLogoPreview', pendingDelhiveryLogo);
+  document.getElementById('settingsOverlay').classList.add('show');
+}
+function renderLogoPreview(elId, base64){
+  const el = document.getElementById(elId);
+  el.innerHTML = base64 ? `<img src="${base64}" style="max-height:36px;max-width:140px;object-fit:contain;">` : '<span class="hint">No logo set</span>';
+}
+let pendingSkLogo = '';
+let pendingDelhiveryLogo = '';
+document.getElementById('setSkLogoFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    pendingSkLogo = ev.target.result;
+    renderLogoPreview('skLogoPreview', pendingSkLogo);
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('setDelhiveryLogoFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    pendingDelhiveryLogo = ev.target.result;
+    renderLogoPreview('delhiveryLogoPreview', pendingDelhiveryLogo);
+  };
+  reader.readAsDataURL(file);
+});
+function closeSettings(){
+  document.getElementById('settingsOverlay').classList.remove('show');
+}
+function saveSettings(){
+  const s = {
+    appsScriptUrl: document.getElementById('setAppsScriptUrl').value.trim(),
+    pickupLocation: document.getElementById('setPickupLocation').value.trim(),
+    originPincode: document.getElementById('setOriginPincode').value.trim(),
+    sellerName: document.getElementById('setSellerName').value.trim(),
+    sellerAddress: document.getElementById('setSellerAddress').value.trim(),
+    sellerGst: document.getElementById('setSellerGst').value.trim(),
+    hsnCode: document.getElementById('setHsnCode').value.trim(),
+    orderPrefix: document.getElementById('setOrderPrefix').value.trim() || 'SKD',
+    officialLabelCropPercent: parseFloat(document.getElementById('setLabelCropPercent').value) || 25,
+    skLogoBase64: pendingSkLogo,
+    delhiveryLogoBase64: pendingDelhiveryLogo
+  };
+  localStorage.setItem(LS_SETTINGS, JSON.stringify(s));
+  closeSettings();
+  showToast('Settings saved');
+  document.getElementById('orderId').value = generateOrderId();
+}
+
+function validateForm(){
+  const required = [
+    ['consigneeName','Consignee name'],
+    ['phone','Phone number'],
+    ['address','Address'],
+    ['pincode','Pincode'],
+    ['weightGrams','Weight']
+  ];
+  for(const [id,label] of required){
+    if(!document.getElementById(id).value.trim()){
+      showToast(label + ' is required');
+      document.getElementById(id).focus();
+      return false;
+    }
+  }
+  if(document.getElementById('phone').value.trim().length !== 10){
+    showToast('Phone number should be 10 digits');
+    return false;
+  }
+  if(document.getElementById('pincode').value.trim().length !== 6){
+    showToast('Pincode should be 6 digits');
+    return false;
+  }
+  if(paymentMode === 'COD' && !document.getElementById('codAmount').value.trim()){
+    showToast('Enter COD amount');
+    return false;
+  }
+  const settings = getSettings();
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+    showToast('Add your Apps Script URL in Settings first');
+    openSettings();
+    return false;
+  }
+  return true;
+}
+
+function buildPayload(){
+  const settings = getSettings();
+  const weightGrams = parseInt(document.getElementById('weightGrams').value, 10) || 500;
+  return {
+    action: 'create',
+    orderId: document.getElementById('orderId').value.trim(),
+    consigneeName: document.getElementById('consigneeName').value.trim(),
+    phone: document.getElementById('phone').value.trim(),
+    address: document.getElementById('address').value.trim().replace(/\n+/g, ', '),
+    pincode: document.getElementById('pincode').value.trim(),
+    city: document.getElementById('city').value.trim(),
+    state: document.getElementById('state').value.trim(),
+    country: 'India',
+    paymentMode: paymentMode,
+    codAmount: document.getElementById('codAmount').value.trim(),
+    totalAmount: document.getElementById('totalAmount').value.trim(),
+    productsDesc: document.getElementById('productsDesc').value.trim(),
+    quantity: document.getElementById('quantity').value.trim() || '1',
+    weightGrams: weightGrams,
+    serviceType: document.getElementById('serviceType').value,
+    shipmentLength: document.getElementById('shipLength').value.trim(),
+    shipmentWidth: document.getElementById('shipWidth').value.trim(),
+    shipmentHeight: document.getElementById('shipHeight').value.trim(),
+    sellerInvoice: document.getElementById('sellerInvoice').value.trim(),
+    sellerInvoiceDate: document.getElementById('sellerInvoiceDate').value.trim(),
+    hsnCode: document.getElementById('hsnCode').value.trim() || settings.hsnCode || '',
+    pickupLocationName: settings.pickupLocation || '',
+    sellerName: settings.sellerName || '',
+    sellerAddress: settings.sellerAddress || '',
+    sellerGstTin: settings.sellerGst || ''
+  };
+}
+
+function jsonpRequest(action, dataObj, timeoutMs){
+  timeoutMs = timeoutMs || 20000;
+  return new Promise((resolve, reject) => {
+    const settings = getSettings();
+    if(!settings.appsScriptUrl){
+      reject(new Error('Apps Script URL not set'));
+      return;
+    }
+    const cbName = 'sklCb_' + Date.now() + '_' + Math.floor(Math.random()*100000);
+    const script = document.createElement('script');
+
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error('Request timed out — check your Apps Script URL and deployment access'));
+    }, timeoutMs);
+
+    function cleanup(){
+      clearTimeout(timeoutId);
+      delete window[cbName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    window[cbName] = function(result){
+      cleanup();
+      resolve(result);
+    };
+
+    script.onerror = function(){
+      cleanup();
+      reject(new Error('Could not reach Apps Script — check the URL and that the deployment access is set to "Anyone"'));
+    };
+
+    const url = settings.appsScriptUrl
+      + '?callback=' + encodeURIComponent(cbName)
+      + '&action=' + encodeURIComponent(action)
+      + '&data=' + encodeURIComponent(JSON.stringify(dataObj));
+    script.src = url;
+    document.body.appendChild(script);
+  });
+}
+
+async function submitBooking(){
+  if(!validateForm()) return;
+  const payload = buildPayload();
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true;
+  btn.textContent = 'Creating shipment…';
+
+  try{
+    const data = await jsonpRequest('create', payload);
+    handleResult(payload, data);
+  }catch(err){
+    handleResult(payload, { success:false, error: err.message });
+  }finally{
+    btn.disabled = false;
+    btn.textContent = 'Create Shipment';
+  }
+}
+
+function handleResult(payload, data){
+  const box = document.getElementById('resultBox');
+  const entry = {
+    orderId: payload.orderId,
+    consigneeName: payload.consigneeName,
+    address: payload.address,
+    phone: payload.phone,
+    city: payload.city,
+    state: payload.state,
+    pincode: payload.pincode,
+    paymentMode: payload.paymentMode,
+    totalAmount: payload.totalAmount,
+    codAmount: payload.codAmount,
+    weightGrams: payload.weightGrams,
+    quantity: payload.quantity,
+    productsDesc: payload.productsDesc || '',
+    serviceType: payload.serviceType || 'Surface',
+    waybill: data.waybill || '',
+    success: !!data.success,
+    remarks: (data.remarks || []).join('; ') || data.error || '',
+    destinationOffice: data.sortCode || '',
+    timestamp: new Date().toISOString()
+  };
+  const hist = getHistory();
+  hist.unshift(entry);
+  saveHistory(hist);
+
+  const debugHtml = `
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--muted);">Debug: what was sent to Delhivery</summary>
+      <pre style="white-space:pre-wrap;font-size:10.5px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(data.debugPayload, null, 2))}</pre>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px;">Delhivery's raw response:</div>
+      <pre style="white-space:pre-wrap;font-size:10.5px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:4px;">${escapeHtml(JSON.stringify(data.raw, null, 2))}</pre>
+    </details>`;
+
+  if(data.success && data.waybill){
+    if(entry.destinationOffice){
+      // sort_code came straight back in the booking response — use it
+      // directly and push it to the shared sheet, no PDF round trip needed.
+      jsonpRequest('updateDestOffice', { orderId: entry.orderId, destinationOffice: entry.destinationOffice }).catch(() => {});
+    } else {
+      // Fallback for the rare case Delhivery's response didn't include
+      // sort_code — pull it from their official label PDF text instead.
+      fetchAndAttachDestInfo(entry.orderId);
+    }
+    box.innerHTML = `
+      <div class="result ok">
+        <div>Shipment created for <strong>${escapeHtml(payload.consigneeName)}</strong></div>
+        <div class="wb">AWB: ${escapeHtml(data.waybill)}</div>
+        <div class="hint">Order ID: ${escapeHtml(payload.orderId)}</div>
+        <div class="actions">
+          <button class="ghost" onclick="downloadLabelPdf('${escapeAttr(entry.orderId)}')">Download PDF</button>
+          <button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(entry.orderId)}')">Print to App</button>
+        </div>
+        <div class="actions">
+          <button class="ghost" onclick="showInternalTracking('${escapeAttr(data.waybill)}')">Track</button>
+          <button class="ghost" onclick="shareWhatsApp('${escapeAttr(entry.orderId)}')">Share</button>
+          <button class="ghost" onclick="startNewBooking()">New Booking</button>
+        </div>
+        ${debugHtml}
+      </div>`;
+    showToast('Shipment created');
+  } else {
+    box.innerHTML = `
+      <div class="result err">
+        <div><strong>Booking failed</strong></div>
+        <div class="hint">${escapeHtml(entry.remarks || 'Check your Apps Script URL and Delhivery credentials.')}</div>
+        <div class="actions">
+          <button class="ghost" onclick="submitBooking()">Retry</button>
+        </div>
+        ${debugHtml}
+      </div>`;
+    showToast('Booking failed — see details above');
+  }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function startNewBooking(){
+  document.getElementById('resultBox').innerHTML = '';
+  document.getElementById('bookingForm').reset();
+  setPayMode('Prepaid');
+  document.querySelectorAll('#contentChips .chip.sel').forEach(el => el.classList.remove('sel'));
+  document.getElementById('orderId').value = generateOrderId();
+}
+
+async function calculateShippingRate(){
+  const destPin = document.getElementById('rateDestPincode').value.trim();
+  const weightGrams = document.getElementById('rateWeightGrams').value.trim();
+  const serviceType = document.getElementById('rateServiceType').value;
+  const settings = getSettings();
+  const resultBox = document.getElementById('rateResultBox');
+
+  if(destPin.length !== 6){
+    showToast('Enter a valid 6-digit destination pincode');
+    return;
+  }
+  if(!weightGrams){
+    showToast('Enter the weight in grams');
+    return;
+  }
+  if(!settings.originPincode){
+    showToast('Set your Origin Pincode in Settings first');
+    openSettings();
+    return;
+  }
+  if(!settings.appsScriptUrl || settings.appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+    showToast('Set up your Apps Script URL in Settings first');
+    return;
+  }
+
+  resultBox.innerHTML = '<div class="card"><div class="hint">Calculating…</div></div>';
+
+  try{
+    const [rateData, pinData, tatData] = await Promise.all([
+      jsonpRequest('rateCalc', { oPin: settings.originPincode, dPin: destPin, weightGrams: weightGrams, mode: serviceType }, 20000),
+      jsonpRequest('pincode', { pincode: destPin }, 15000).catch(() => ({ success: false, error: 'Could not check serviceability' })),
+      jsonpRequest('expectedTat', { oPin: settings.originPincode, dPin: destPin, mode: serviceType }, 15000).catch(() => ({ success: false }))
+    ]);
+
+    if(!rateData.success){
+      resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(rateData.error || 'Unknown error')}</div></div>`;
+      return;
+    }
+
+    // Delhivery's exact response field names aren't publicly documented, so
+    // try common candidates for the headline total, and always show the full
+    // raw response too so nothing is hidden if our guess doesn't match.
+    const raw = rateData.raw;
+    const flat = Array.isArray(raw) ? (raw[0] || {}) : raw;
+    const totalCandidates = ['total_amount', 'gross_amount', 'total', 'chargeable_amount'];
+    let total = null;
+    for(const key of totalCandidates){
+      if(flat && flat[key] !== undefined && flat[key] !== null){ total = flat[key]; break; }
+    }
+
+    // Serviceability block
+    let serviceabilityHtml = '';
+    if(pinData.success){
+      const bits = [];
+      if(pinData.prepaid) bits.push('Prepaid ✓');
+      if(pinData.cod) bits.push('COD ✓');
+      if(pinData.isOda) bits.push('ODA area');
+      serviceabilityHtml = `<div style="color:var(--ok);font-weight:700;font-size:13px;">Serviceable${pinData.city ? ' — ' + escapeHtml(pinData.city) : ''}</div>
+        ${bits.length ? `<div class="hint">${escapeHtml(bits.join(', '))}</div>` : ''}`;
+    } else {
+      serviceabilityHtml = `<div style="color:var(--err);font-weight:700;font-size:13px;">${escapeHtml(pinData.error || 'Not serviceable')}</div>`;
+    }
+
+    // Transit time — from Delhivery's dedicated Expected TAT API
+    // (confirmed endpoint). Falls back to the older best-effort field scan
+    // against the rate/serviceability responses only if that call fails.
+    let tatHtml;
+    if(tatData && tatData.success){
+      const tatFlat = Array.isArray(tatData.raw) ? (tatData.raw[0] || {}) : (tatData.raw || {});
+      const tatCandidates = ['tat', 'expected_tat', 'days', 'delivery_date'];
+      let tatValue = null;
+      for(const key of tatCandidates){
+        if(tatFlat && tatFlat[key] !== undefined && tatFlat[key] !== null){ tatValue = tatFlat[key]; break; }
+      }
+      if(tatValue === null && tatData.tatMatches && tatData.tatMatches.length){
+        tatValue = tatData.tatMatches[0].value;
+      }
+      tatHtml = tatValue !== null
+        ? `<div class="hint" style="margin-top:4px;">Expected transit time: <strong>${escapeHtml(String(tatValue))}</strong></div>`
+        : `<div class="hint" style="margin-top:4px;">Transit time: see full TAT response below</div>`;
+    } else {
+      const tatSource = (rateData.tatMatches && rateData.tatMatches.length) ? rateData.tatMatches[0]
+        : (pinData.tatMatches && pinData.tatMatches.length) ? pinData.tatMatches[0]
+        : null;
+      tatHtml = tatSource
+        ? `<div class="hint" style="margin-top:4px;">Transit time (best guess — field "${escapeHtml(tatSource.key)}"): <strong>${escapeHtml(tatSource.value)}</strong></div>`
+        : `<div class="hint" style="margin-top:4px;">Transit time: not available from Delhivery's response for this pincode</div>`;
+    }
+
+    resultBox.innerHTML = `
+      <div class="result ok">
+        ${total !== null ? `<div class="wb">₹${escapeHtml(total)}</div><div class="hint">Approximate charge — Delhivery's actual invoice amount may vary slightly</div>` : `<div class="hint">Calculated — see full response below (couldn't identify a single total field, so showing everything Delhivery returned)</div>`}
+        <div class="hint" style="margin-top:8px;">${escapeHtml(destPin)} · ${escapeHtml(weightGrams)}g · ${escapeHtml(serviceType)}</div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--line);">
+          ${serviceabilityHtml}
+          ${tatHtml}
+        </div>
+        <details style="margin-top:10px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full rate response</summary>
+          <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(raw, null, 2))}</pre>
+        </details>
+        ${pinData.success ? `<details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full serviceability response</summary>
+          <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(pinData.raw, null, 2))}</pre>
+        </details>` : ''}
+        ${tatData && tatData.success ? `<details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full TAT response</summary>
+          <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(tatData.raw, null, 2))}</pre>
+        </details>` : ''}
+      </div>`;
+  }catch(err){
+    resultBox.innerHTML = `<div class="result err"><div><strong>Could not calculate rate</strong></div><div class="hint">${escapeHtml(err.message || 'Unknown error')}</div></div>`;
+  }
+}
+
+function trackingUrl(waybill){
+  return 'https://www.delhivery.com/track-v2/package/' + encodeURIComponent(waybill);
+}
+function openTracking(waybill){
+  window.open(trackingUrl(waybill), '_blank');
+}
+function closeTrackingModal(){
+  document.getElementById('trackingOverlay').classList.remove('show');
+}
+
+async function showInternalTracking(waybill){
+  if(!waybill){
+    showToast('No AWB available for this order yet');
+    return;
+  }
+  document.getElementById('trackingOverlay').classList.add('show');
+  const content = document.getElementById('trackingContent');
+  content.innerHTML = '<p class="hint">Loading tracking info…</p>';
+
+  try{
+    const data = await jsonpRequest('trackShipment', { waybill }, 15000);
+    if(!data.success){
+      content.innerHTML = `
+        <p class="hint">${escapeHtml(data.error || 'Could not fetch tracking')}</p>
+        <button class="ghost" style="width:100%;margin-top:10px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+      return;
+    }
+    const shipment = data.shipment || {};
+    const scans = shipment.scans || [];
+    const scansHtml = scans.length ? `
+      <div style="margin-top:14px;max-height:260px;overflow-y:auto;">
+        ${scans.map(s => `
+          <div style="border-bottom:1px solid var(--line);padding:8px 0;font-size:12.5px;">
+            <div style="font-weight:700;">${escapeHtml(s.status || '')}</div>
+            <div class="hint">${escapeHtml(s.location || '')}${s.date ? ' · ' + escapeHtml(s.date) : ''}</div>
+          </div>
+        `).join('')}
+      </div>` : '';
+
+    content.innerHTML = `
+      <div style="text-align:center;padding:8px 0 4px;">
+        <div style="font-size:20px;font-weight:800;color:var(--navy);">${escapeHtml(shipment.status || 'Unknown')}</div>
+        <div class="hint">AWB ${escapeHtml(waybill)}${shipment.statusLocation ? ' · ' + escapeHtml(shipment.statusLocation) : ''}</div>
+        ${shipment.statusDateTime ? `<div class="hint">${escapeHtml(shipment.statusDateTime)}</div>` : ''}
+      </div>
+      ${scansHtml}
+      <details style="margin-top:10px;">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full response</summary>
+        <pre style="white-space:pre-wrap;font-size:11px;background:#F3F5F6;padding:8px;border-radius:8px;margin-top:6px;">${escapeHtml(JSON.stringify(shipment.raw, null, 2))}</pre>
+      </details>
+      <button class="ghost" style="width:100%;margin-top:14px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+  }catch(err){
+    content.innerHTML = `
+      <p class="hint">${escapeHtml(err.message || 'Could not fetch tracking')}</p>
+      <button class="ghost" style="width:100%;margin-top:10px;" onclick="openTracking('${escapeAttr(waybill)}')">Open on Delhivery website</button>`;
+  }
+}
+
+function renderHistory(){
+  const hist = recentOnly(getHistory());
+  const list = document.getElementById('historyList');
+  if(!hist.length){
+    list.innerHTML = '<div class="empty">No bookings yet.</div>';
+    return;
+  }
+  list.innerHTML = hist.map(h => `
+    <div class="hist-item">
+      <div class="hist-top">
+        <span>${escapeHtml(h.consigneeName)}</span>
+        <span class="badge ${h.success ? 'ok' : 'err'}">${h.success ? 'Created' : 'Failed'}</span>
+      </div>
+      <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
+      <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
+      ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="showInternalTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
+      <div class="actions"><button class="ghost" onclick="cloneBooking('${escapeAttr(h.orderId)}')">Clone</button></div>
+    </div>
+  `).join('');
+}
+
+function cloneBooking(orderId){
+  const h = getHistory().find(x => x.orderId === orderId);
+  if(!h) return;
+  showTab('new');
+  startNewBooking();
+  const set = (id, v) => { const el = document.getElementById(id); if(el && v !== undefined && v !== null) el.value = v; };
+  set('consigneeName', h.consigneeName);
+  set('phone', h.phone);
+  set('address', h.address);
+  set('pincode', h.pincode);
+  set('city', h.city);
+  set('state', h.state);
+  set('totalAmount', h.totalAmount);
+  set('weightGrams', h.weightGrams);
+  set('quantity', h.quantity || 1);
+  set('serviceType', h.serviceType || 'Surface');
+  set('productsDesc', h.productsDesc || '');
+  setPayMode(h.paymentMode === 'COD' ? 'COD' : 'Prepaid');
+  if(h.paymentMode === 'COD') set('codAmount', h.codAmount);
+  if(String(h.pincode || '').length === 6) checkPincodeUI(String(h.pincode));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  showToast('Cloned — new Order ID created, review and book');
+}
+
+function shareWhatsApp(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry) return;
+  const msg = `*SK Logistics — Shipment Booked*%0A` +
+    `Consignee: ${encodeURIComponent(entry.consigneeName)}%0A` +
+    `Order ID: ${encodeURIComponent(entry.orderId)}%0A` +
+    `AWB / Tracking No: ${encodeURIComponent(entry.waybill)}%0A` +
+    `Track here: ${encodeURIComponent(trackingUrl(entry.waybill))}`;
+  window.open(`https://wa.me/?text=${msg}`, '_blank');
+}
+
+function escapeHtml(str){
+  if(str===undefined || str===null) return '';
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+function escapeAttr(str){
+  return String(str).replace(/'/g, "\\'");
+}
+
+async function checkPincodeUI(pin){
+  const statusEl = document.getElementById('pincodeStatus');
+  const settings = getSettings();
+  if(!settings.appsScriptUrl){
+    statusEl.textContent = '';
+    return;
+  }
+  statusEl.textContent = 'Checking pincode…';
+  try{
+    const data = await jsonpRequest('pincode', { pincode: pin });
+    if(data.success){
+      if(!document.getElementById('city').value.trim()) document.getElementById('city').value = data.city || '';
+      if(!document.getElementById('state').value.trim()) document.getElementById('state').value = data.state || '';
+      const bits = [];
+      if(data.prepaid) bits.push('Prepaid ✓');
+      if(data.cod) bits.push('COD ✓');
+      if(data.isOda) bits.push('ODA area');
+      statusEl.textContent = 'Serviceable — ' + (bits.join(', ') || 'no service flags returned');
+      statusEl.style.color = 'var(--ok)';
+    } else {
+      statusEl.textContent = data.error || 'Not serviceable by Delhivery';
+      statusEl.style.color = 'var(--err)';
+    }
+  }catch(err){
+    statusEl.textContent = '';
+  }
+}
+
+function base64ToBlob(base64, mime){
+  const byteChars = atob(base64);
+  const byteNumbers = new Array(byteChars.length);
+  for(let i=0; i<byteChars.length; i++){ byteNumbers[i] = byteChars.charCodeAt(i); }
+  return new Blob([new Uint8Array(byteNumbers)], { type: mime });
+}
+
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
+
+async function fetchAndAttachDestInfo(orderId){
+  try{
+    const hist = getHistory();
+    const entry = hist.find(h => h.orderId === orderId);
+    if(!entry || !entry.waybill) return;
+
+    // Pull Delhivery's own official label PDF and read the destination
+    // station/facility line directly out of its actual text — this is what
+    // genuinely appears on their real label (e.g. "Kolkata_Jorasanko1_D
+    // (West Bengal)"), which is far more reliable than guessing at JSON
+    // field names from the packing_slip API's response shape.
+    const data = await jsonpRequest('officialLabel', { waybill: entry.waybill }, 45000);
+    if(!data.success || !data.pdfBase64) return;
+
+    const binary = atob(data.pdfBase64);
+    const bytes = new Uint8Array(binary.length);
+    for(let i = 0; i < binary.length; i++){ bytes[i] = binary.charCodeAt(i); }
+
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const page = await pdf.getPage(1);
+    const textContent = await page.getTextContent();
+    const text = textContent.items.map(item => item.str).join(' ');
+
+    // Looks for the "City_Facility_Code (State)" pattern Delhivery prints
+    // on the real label, e.g. "Raygada_GandhiNgr_DPP (Orissa)". PDF text
+    // extraction can introduce stray spacing around punctuation, so the
+    // pattern tolerates that and the result is cleaned up afterward.
+    const match = text.match(/\b([A-Za-z0-9]+(?:\s*_\s*[A-Za-z0-9]+){1,4})\s*\(\s*([A-Za-z .]+?)\s*\)/);
+    if(match){
+      const facility = match[1].replace(/\s*_\s*/g, '_').trim();
+      const state = match[2].trim();
+      entry.destinationOffice = `${facility} (${state})`;
+      saveHistory(hist);
+      jsonpRequest('updateDestOffice', { orderId: entry.orderId, destinationOffice: entry.destinationOffice }).catch(() => {});
+    }
+  }catch(err){
+    // Non-critical enhancement — fail silently, label just won't show this line
+  }
+}
+
+async function cropOfficialLabelPdf(base64Pdf){
+  const settings = getSettings();
+  const cropPercent = parseFloat(settings.officialLabelCropPercent) || 25;
+  const binary = atob(base64Pdf);
+  const bytes = new Uint8Array(binary.length);
+  for(let i=0; i<binary.length; i++){ bytes[i] = binary.charCodeAt(i); }
+
+  const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+  while(pdfDoc.getPageCount() > 1){
+    pdfDoc.removePage(1);
+  }
+  const page = pdfDoc.getPage(0);
+  const { width, height } = page.getSize();
+  const cropHeight = height * (cropPercent / 100);
+  page.setCropBox(0, height - cropHeight, width, cropHeight);
+  return await pdfDoc.save();
+}
+
+async function fetchOfficialLabel(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  // Open the window immediately (synchronously, inside the click handler) so
+  // browsers don't treat it as a blocked popup once we start awaiting the fetch.
+  const win = window.open('', '_blank');
+  if(win){
+    win.document.write('<body style="font-family:sans-serif;padding:20px;color:#333;">Fetching label from Delhivery…</body>');
+  }
+  showToast('Fetching official label from Delhivery…');
+  try{
+    const data = await jsonpRequest('officialLabel', { waybill: entry.waybill }, 45000);
+    if(data.success && data.pdfBase64){
+      const croppedBytes = await cropOfficialLabelPdf(data.pdfBase64);
+      const blob = new Blob([croppedBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      if(win) win.location.href = url;
+      else window.open(url, '_blank');
+    } else {
+      if(win) win.document.body.innerHTML = 'Could not fetch official label: ' + escapeHtml(data.error || 'unknown error');
+      showToast(data.error || 'Could not fetch official label');
+    }
+  }catch(err){
+    if(win) win.document.body.innerHTML = 'Could not fetch official label: ' + escapeHtml(err.message || 'unknown error');
+    showToast(err.message || 'Could not fetch official label');
+  }
+}
+
+// ---- Label printing (100mm x 75mm) ----
+function buildLabelDocumentHtml(entry, settings, autoPrint){
+  return `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Label ${escapeHtml(entry.orderId)}</title>
+<style>
+  @page{ size:100mm 75mm; margin:0; }
+  *{box-sizing:border-box;}
+  body{margin:0;width:100mm;height:75mm;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#000;}
+  .label{width:100mm;height:75mm;border:1.4px solid #000;display:flex;flex-direction:column;overflow:hidden;}
+
+  .logos{display:flex;border-bottom:1.4px solid #000;height:14mm;}
+  .logos .box{flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;padding:1mm 2mm;}
+  .logos .box:first-child{border-right:1.4px solid #000;}
+  .logos .box img{max-height:11mm;max-width:44mm;object-fit:contain;}
+  .logo-sk{font-weight:800;font-size:15px;font-style:italic;}
+  .logo-sk .sk{color:#C0392B;}
+  .logo-sk .rest{color:#1B4B66;}
+  .logo-dl{font-weight:800;font-size:15px;letter-spacing:.5px;color:#2E3A46;}
+
+  .barcode-block{border-bottom:1.4px solid #000;padding:2mm 0 1.5mm;text-align:center;}
+  .barcode-block svg{max-width:96mm;height:auto;}
+  .awb-text{font-size:13px;font-weight:700;letter-spacing:1.5px;margin-top:0.5mm;}
+
+  .pincode-row{display:flex;border-bottom:1.4px solid #000;height:11mm;}
+  .pincode-row .pin{flex:1;display:flex;align-items:center;justify-content:space-between;padding:0 2.5mm;}
+  .pincode-row .pin-num{font-size:22px;font-weight:700;}
+  .pincode-row .pin-dest{font-size:11px;font-weight:700;color:#333;}
+  .pincode-row .svc{width:26mm;border-left:1.4px solid #000;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;text-align:center;}
+
+  .body-row{display:flex;flex:1;}
+  .addr{flex:1;padding:2mm 2.5mm;font-size:10.5px;line-height:1.38;overflow:hidden;word-wrap:break-word;overflow-wrap:break-word;}
+  .addr .hdr{font-weight:700;font-size:11px;}
+  .addr .name{font-weight:700;font-size:13px;margin:0.5mm 0 1mm;word-wrap:break-word;overflow-wrap:break-word;}
+  .addr .addr-text{word-wrap:break-word;overflow-wrap:break-word;}
+  .addr .pinline{font-weight:700;margin-top:1mm;}
+  .side{width:24mm;border-left:1.4px solid #000;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-weight:700;font-size:13px;line-height:1.5;}
+  .side .amt{font-size:15px;margin-top:2mm;}
+</style></head>
+<body>
+  <div class="label">
+
+    <div class="logos">
+      <div class="box">${settings.skLogoBase64 ? `<img src="${settings.skLogoBase64}">` : `<span class="logo-sk"><span class="sk">SK</span><span class="rest"> LOGISTICS</span></span>`}</div>
+      <div class="box">${settings.delhiveryLogoBase64 ? `<img src="${settings.delhiveryLogoBase64}">` : `<span class="logo-dl">DELHIVERY</span>`}</div>
+    </div>
+
+    <div class="barcode-block">
+      <svg id="barcode"></svg>
+      <div class="awb-text">${escapeHtml(entry.waybill)}</div>
+    </div>
+
+    <div class="pincode-row">
+      <div class="pin">
+        <span class="pin-num">${escapeHtml(entry.pincode || '')}</span>
+        ${entry.destinationOffice ? `<span class="pin-dest">${escapeHtml(entry.destinationOffice)}</span>` : ''}
+      </div>
+      <div class="svc">${escapeHtml(entry.serviceType || 'Surface')}</div>
+    </div>
+
+    <div class="body-row">
+      <div class="addr">
+        <div class="hdr">Ship To:</div>
+        <div class="name">${escapeHtml(entry.consigneeName)}</div>
+        <div class="addr-text">${escapeHtml(entry.address || '')}</div>
+        <div>${escapeHtml(entry.city || '')}${entry.city ? ', ' : ''}${escapeHtml(entry.state || '')}</div>
+        <div>Ph: ${escapeHtml(entry.phone || '')}</div>
+        <div class="pinline">PIN: ${escapeHtml(entry.pincode || '')}</div>
+      </div>
+      <div class="side">
+        <div>${escapeHtml(entry.paymentMode)}</div>
+        <div>${escapeHtml(entry.serviceType || 'Surface')}</div>
+        ${entry.paymentMode === 'COD' ? `<div class="amt">₹${escapeHtml(entry.codAmount || '')}</div>` : ''}
+      </div>
+    </div>
+
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
+<script>
+  JsBarcode("#barcode", "${entry.waybill}", {
+    format: "CODE128",
+    width: 2.4,
+    height: 34,
+    displayValue: false,
+    margin: 0
+  });
+  ${autoPrint ? 'window.onload = function(){ setTimeout(function(){ window.print(); }, 250); };' : ''}
+<\/script>
+</body></html>`;
+}
+
+async function downloadLabelPdf(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  const settings = getSettings();
+  showToast('Generating label PDF…');
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:500px;height:400px;border:0;';
+  document.body.appendChild(iframe);
+
+  iframe.onload = async function(){
+    try{
+      await new Promise(r => setTimeout(r, 200)); // let the barcode SVG finish painting
+      const labelEl = iframe.contentDocument.querySelector('.label');
+      const canvas = await html2canvas(labelEl, { scale: 4, backgroundColor: '#ffffff' });
+      if(iframe.parentNode) document.body.removeChild(iframe);
+
+      const imgDataUrl = canvas.toDataURL('image/png');
+      const imgBase64 = imgDataUrl.split(',')[1];
+      const binary = atob(imgBase64);
+      const imgBytes = new Uint8Array(binary.length);
+      for(let i = 0; i < binary.length; i++){ imgBytes[i] = binary.charCodeAt(i); }
+
+      const mmToPt = 2.834645669; // 1mm in PDF points
+      const pageWidth = 100 * mmToPt;
+      const pageHeight = 75 * mmToPt;
+
+      const pdfDoc = await PDFLib.PDFDocument.create();
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+      const pngImage = await pdfDoc.embedPng(imgBytes);
+      page.drawImage(pngImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+
+      const pdfBytes = await pdfDoc.save();
+
+      if(isNativeApp()){
+        const { Filesystem, Share } = window.Capacitor.Plugins;
+        const pdfBase64 = uint8ArrayToBase64(pdfBytes);
+        const fileName = entry.orderId + '_label.pdf';
+        await Filesystem.writeFile({ path: fileName, data: pdfBase64, directory: 'CACHE' });
+        const uriResult = await Filesystem.getUri({ path: fileName, directory: 'CACHE' });
+        await Share.share({ title: 'Shipping Label PDF', text: entry.orderId, url: uriResult.uri });
+        showToast('Label PDF ready — save or share it from there');
+        return;
+      }
+
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = entry.orderId + '_label.pdf';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      showToast('Label PDF downloaded');
+    }catch(err){
+      if(iframe.parentNode) document.body.removeChild(iframe);
+      showToast('Could not generate PDF: ' + err.message);
+    }
+  };
+
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(buildLabelDocumentHtml(entry, settings, false));
+  iframe.contentDocument.close();
+}
+
+async function shareLabelToPrinterApp(orderId){
+  const hist = getHistory();
+  const entry = hist.find(h => h.orderId === orderId);
+  if(!entry || !entry.waybill){
+    showToast('No AWB found for this order yet');
+    return;
+  }
+  const settings = getSettings();
+  showToast('Preparing label image…');
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:500px;height:400px;border:0;';
+  document.body.appendChild(iframe);
+
+  iframe.onload = async function(){
+    try{
+      await new Promise(r => setTimeout(r, 200)); // let the barcode SVG finish painting
+      const labelEl = iframe.contentDocument.querySelector('.label');
+      const canvas = await html2canvas(labelEl, { scale: 4, backgroundColor: '#ffffff' });
+      canvas.toBlob(async function(blob){
+        if(iframe.parentNode) document.body.removeChild(iframe);
+        if(!blob){
+          showToast('Could not generate label image');
+          return;
+        }
+
+        if(isNativeApp()){
+          try{
+            const { Filesystem, Share } = window.Capacitor.Plugins;
+            const base64 = await blobToBase64(blob);
+            const fileName = entry.orderId + '_label.jpg';
+            await Filesystem.writeFile({ path: fileName, data: base64, directory: 'CACHE' });
+            const uriResult = await Filesystem.getUri({ path: fileName, directory: 'CACHE' });
+            await Share.share({ title: 'Shipping Label', text: entry.orderId, url: uriResult.uri });
+          }catch(shareErr){
+            if(!(shareErr && shareErr.message && shareErr.message.indexOf('cancel') !== -1)){
+              showToast('Could not share label: ' + (shareErr.message || 'unknown error'));
+            }
+          }
+          return;
+        }
+
+        const file = new File([blob], entry.orderId + '_label.jpg', { type: 'image/jpeg' });
+        if(navigator.canShare && navigator.canShare({ files: [file] })){
+          try{
+            await navigator.share({ files: [file], title: 'Shipping Label', text: entry.orderId });
+          }catch(shareErr){
+            // User cancelled the share sheet — not an error worth surfacing
+          }
+        } else {
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+          showToast('Long-press the image and choose your printer app to share it');
+        }
+      }, 'image/jpeg', 0.95);
+    }catch(err){
+      if(iframe.parentNode) document.body.removeChild(iframe);
+      showToast('Could not generate label image: ' + err.message);
+    }
+  };
+
+  iframe.contentDocument.open();
+  iframe.contentDocument.write(buildLabelDocumentHtml(entry, settings, false));
+  iframe.contentDocument.close();
+}
+
+// Init
+document.getElementById('orderId').value = generateOrderId();
+document.getElementById('address').addEventListener('input', function(){
+  const lines = this.value.split('\n');
+  if(lines.length > 6){
+    const cursorAtEnd = this.selectionStart === this.value.length;
+    this.value = lines.slice(0, 6).join('\n');
+    if(cursorAtEnd) this.selectionStart = this.selectionEnd = this.value.length;
+  }
+  this.scrollTop = 0; // show from the top instead of leaving it scrolled to wherever the cursor landed
+});
+
+document.getElementById('pincode').addEventListener('input', function(){
+  this.value = this.value.replace(/\D/g,'').slice(0,6);
+  document.getElementById('pincodeStatus').textContent = '';
+  if(this.value.length === 6) checkPincodeUI(this.value);
+});
+document.getElementById('phone').addEventListener('input', function(){
+  this.value = this.value.replace(/\D/g,'').slice(0,10);
+});
+if(!getSettings().appsScriptUrl || getSettings().appsScriptUrl.indexOf('PASTE_YOUR') === 0){
+  setTimeout(()=>{ showToast('Set up your Apps Script URL in Settings'); }, 600);
+}
+
+// ---- Install as app (PWA) ----
+let deferredInstallPrompt = null;
+function isStandalone(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+function isIos(){ return /iphone|ipad|ipod/i.test(navigator.userAgent); }
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById('installBtn').style.display = 'block';
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  document.getElementById('installBtn').style.display = 'none';
+  showToast('App installed');
+});
+async function installApp(){
+  if(deferredInstallPrompt){
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    document.getElementById('installBtn').style.display = 'none';
+  } else if(isIos()){
+    showToast('Tap the Share icon, then "Add to Home Screen"');
+  } else {
+    showToast('Open the browser menu (⋮) and choose "Install app" / "Add to Home screen"');
+  }
+}
+if(!isStandalone() && !isNativeApp() && isIos()){
+  document.getElementById('installBtn').style.display = 'block'; // iOS has no install event
+}
+if('serviceWorker' in navigator && !isNativeApp() && location.protocol === 'https:'){
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+
+</body>
+</html>
