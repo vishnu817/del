@@ -304,6 +304,7 @@
   <div id="tabHist" style="display:none;">
     <div class="card">
       <h2>Recent Bookings</h2>
+      <input id="historySearch" type="search" oninput="renderHistory()" placeholder="Search name, phone, AWB, order ID, pincode, city" autocomplete="off" style="width:100%;margin-bottom:10px;">
       <div id="historyList"><div class="empty">No bookings yet.</div></div>
     </div>
   </div>
@@ -1385,6 +1386,12 @@ function closeTrackingModal(){
   document.getElementById('trackingOverlay').classList.remove('show');
 }
 
+function formatExpectedDate(raw){
+  const d = new Date(raw);
+  if(isNaN(d.getTime())) return String(raw);
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 async function showInternalTracking(waybill){
   if(!waybill){
     showToast('No AWB available for this order yet');
@@ -1420,6 +1427,10 @@ async function showInternalTracking(waybill){
         <div class="hint">AWB ${escapeHtml(waybill)}${shipment.statusLocation ? ' · ' + escapeHtml(shipment.statusLocation) : ''}</div>
         ${shipment.statusDateTime ? `<div class="hint">${escapeHtml(shipment.statusDateTime)}</div>` : ''}
       </div>
+      <div style="margin-top:10px;padding:10px 12px;background:#F3F5F6;border-radius:10px;text-align:center;">
+        <div class="hint" style="margin:0;">Expected delivery</div>
+        <div style="font-size:16px;font-weight:800;color:var(--navy);">${shipment.expectedDelivery ? escapeHtml(formatExpectedDate(shipment.expectedDelivery)) : 'Not available yet'}</div>
+      </div>
       ${scansHtml}
       <details style="margin-top:10px;">
         <summary style="cursor:pointer;font-size:12.5px;color:var(--muted);">Full response</summary>
@@ -1434,10 +1445,13 @@ async function showInternalTracking(waybill){
 }
 
 function renderHistory(){
-  const hist = recentOnly(getHistory());
+  const all = recentOnly(getHistory());
   const list = document.getElementById('historyList');
+  const q = (document.getElementById('historySearch').value || '').trim().toLowerCase();
+  const hist = q ? all.filter(h => [h.consigneeName, h.phone, h.waybill, h.orderId, h.pincode, h.city, h.state, h.address]
+    .some(v => String(v == null ? '' : v).toLowerCase().indexOf(q) !== -1)) : all;
   if(!hist.length){
-    list.innerHTML = '<div class="empty">No bookings yet.</div>';
+    list.innerHTML = '<div class="empty">' + (q ? 'No shipments match your search.' : 'No bookings yet.') + '</div>';
     return;
   }
   list.innerHTML = hist.map(h => `
