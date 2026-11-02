@@ -170,6 +170,8 @@
   </div>
 </header>
 
+<div id="ndrBanner" onclick="showTab('hist')" style="display:none;background:#C0392B;color:#fff;padding:10px 16px;font-size:13px;font-weight:700;text-align:center;cursor:pointer;"></div>
+
 <main>
 
   <!-- NEW BOOKING TAB -->
@@ -304,6 +306,7 @@
   <div id="tabHist" style="display:none;">
     <div class="card">
       <h2>Recent Bookings</h2>
+      <button type="button" class="ghost" style="width:100%;margin-bottom:8px;font-size:12.5px;" onclick="checkNdrNow()">Check for NDR now</button>
       <input id="historySearch" type="search" oninput="renderHistory()" placeholder="Search name, phone, AWB, order ID, pincode, city" autocomplete="off" style="width:100%;margin-bottom:10px;">
       <div id="historyList"><div class="empty">No bookings yet.</div></div>
     </div>
@@ -948,6 +951,7 @@ async function loadSharedHistory(){
     const data = await jsonpRequest('fetchHistory', { limit: 200 }, 15000);
     if(data.success){
       saveHistory(data.entries || []);
+      updateNdrBanner();
     } else {
       showToast(data.error || 'Could not load shared history — showing local copy');
     }
@@ -1458,8 +1462,9 @@ function renderHistory(){
     <div class="hist-item">
       <div class="hist-top">
         <span>${escapeHtml(h.consigneeName)}</span>
-        <span class="badge ${h.success ? 'ok' : 'err'}">${h.success ? 'Created' : 'Failed'}</span>
+        <span class="badge ${h.ndrReason ? 'err' : (h.success ? 'ok' : 'err')}">${h.ndrReason ? 'NDR' : (h.success ? 'Created' : 'Failed')}</span>
       </div>
+      ${h.ndrReason ? `<div class="hist-sub" style="color:var(--err);font-weight:700;">Delivery failed: ${escapeHtml(h.ndrReason)}${h.phone ? ' · <a href="tel:' + escapeAttr(h.phone) + '" style="color:var(--err);">Call ' + escapeHtml(h.phone) + '</a>' : ''}</div>` : (h.liveStatus ? `<div class="hist-sub">${escapeHtml(h.liveStatus)}</div>` : '')}
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
       ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="showInternalTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
@@ -1926,6 +1931,43 @@ if(!isStandalone() && !isNativeApp() && isIos()){
 if('serviceWorker' in navigator && !isNativeApp() && location.protocol === 'https:'){
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
+
+// ---- NDR alerts ----
+function updateNdrBanner(){
+  const ndr = recentOnly(getHistory()).filter(h => h.ndrReason);
+  const banner = document.getElementById('ndrBanner');
+  const histTab = document.getElementById('tabHistBtn');
+  if(ndr.length){
+    banner.textContent = '\u26A0 ' + ndr.length + ' shipment' + (ndr.length > 1 ? 's' : '') + ' with delivery failed (NDR) \u2014 tap to view';
+    banner.style.display = 'block';
+    histTab.textContent = 'History (' + ndr.length + ')';
+  } else {
+    banner.style.display = 'none';
+    histTab.textContent = 'History';
+  }
+}
+async function checkNdrNow(){
+  showToast('Checking Delhivery for NDR…');
+  try{
+    const data = await jsonpRequest('checkNdr', {}, 60000);
+    if(!data.success){ showToast(data.error || 'Could not check NDR'); return; }
+    showToast(data.ndr.length ? data.ndr.length + ' NDR shipment(s) found' : 'No NDR shipments (' + data.checked + ' checked)');
+    await loadSharedHistory();
+  }catch(err){
+    showToast('Could not check NDR: ' + err.message);
+  }
+}
+async function refreshNdrOnStartup(){
+  const s = getSettings();
+  if(!s.appsScriptUrl || s.appsScriptUrl.indexOf('PASTE_YOUR') === 0) return;
+  try{
+    const data = await jsonpRequest('fetchHistory', { limit: 200 }, 15000);
+    if(data.success){ saveHistory(data.entries || []); }
+  }catch(err){ /* offline — fall back to cached history */ }
+  updateNdrBanner();
+}
+updateNdrBanner();
+refreshNdrOnStartup();
 </script>
 
 </body>
