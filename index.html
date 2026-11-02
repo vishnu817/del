@@ -334,6 +334,17 @@
   </div>
 </div>
 
+<!-- DELETE ORDER MODAL -->
+<div class="modal-overlay" id="deleteOverlay">
+  <div class="modal">
+    <button class="modal-close" onclick="closeDeleteOrder()">&times;</button>
+    <h2>Delete order</h2>
+    <div id="deleteInfo" class="hint" style="margin-bottom:12px;"></div>
+    <button type="button" id="deleteCancelBtn" class="primary" style="width:100%;margin-bottom:8px;background:var(--err);" onclick="confirmDeleteOrder()">Cancel at Delhivery &amp; delete</button>
+    <div class="hint" id="deleteHint"></div>
+  </div>
+</div>
+
 <!-- TRACKING MODAL -->
 <div class="modal-overlay" id="trackingOverlay">
   <div class="modal">
@@ -1448,17 +1459,22 @@ async function showInternalTracking(waybill){
   }
 }
 
+let ndrOnlyView = false;
+function setNdrView(on){ ndrOnlyView = !!on; renderHistory(); }
+function ndrBarHtml(){
+  return ndrOnlyView ? '<div style="background:#FBEAE8;color:var(--err);font-weight:700;font-size:12.5px;padding:8px 12px;border-radius:10px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;"><span>Showing NDR shipments only</span><button type="button" class="ghost" style="width:auto;padding:4px 10px;font-size:12px;" onclick="setNdrView(false)">Show all</button></div>' : '';
+}
 function renderHistory(){
-  const all = recentOnly(getHistory());
+  const all = recentOnly(getHistory()).filter(h => !ndrOnlyView || h.ndrReason);
   const list = document.getElementById('historyList');
   const q = (document.getElementById('historySearch').value || '').trim().toLowerCase();
   const hist = q ? all.filter(h => [h.consigneeName, h.phone, h.waybill, h.orderId, h.pincode, h.city, h.state, h.address]
     .some(v => String(v == null ? '' : v).toLowerCase().indexOf(q) !== -1)) : all;
   if(!hist.length){
-    list.innerHTML = '<div class="empty">' + (q ? 'No shipments match your search.' : 'No bookings yet.') + '</div>';
+    list.innerHTML = ndrBarHtml() + '<div class="empty">' + (ndrOnlyView ? 'No NDR shipments right now.' : (q ? 'No shipments match your search.' : 'No bookings yet.')) + '</div>';
     return;
   }
-  list.innerHTML = hist.map(h => `
+  list.innerHTML = ndrBarHtml() + hist.map(h => `
     <div class="hist-item">
       <div class="hist-top">
         <span>${escapeHtml(h.consigneeName)}</span>
@@ -1468,7 +1484,7 @@ function renderHistory(){
       <div class="hist-sub">${escapeHtml(h.orderId)} ${h.waybill ? '· AWB ' + escapeHtml(h.waybill) : ''}</div>
       <div class="hist-sub">${escapeHtml(h.city || '')} ${h.pincode || ''} · ${h.paymentMode}${h.paymentMode==='COD' ? ' ₹' + escapeHtml(h.codAmount||'') : ''}</div>
       ${h.success ? `<div class="actions"><button class="ghost" onclick="downloadLabelPdf('${escapeAttr(h.orderId)}')">Download PDF</button><button class="ghost" onclick="shareLabelToPrinterApp('${escapeAttr(h.orderId)}')">Print to App</button></div><div class="actions">${h.waybill ? `<button class="ghost" onclick="showInternalTracking('${escapeAttr(h.waybill)}')">Track</button>` : ''}<button class="ghost" onclick="shareWhatsApp('${escapeAttr(h.orderId)}')">Share</button></div>` : ''}
-      <div class="actions"><button class="ghost" onclick="cloneBooking('${escapeAttr(h.orderId)}')">Clone</button></div>
+      <div class="actions"><button class="ghost" onclick="cloneBooking('${escapeAttr(h.orderId)}')">Clone</button>${canDeleteOrder(h) ? `<button class="ghost" style="color:var(--err);" onclick="openDeleteOrder('${escapeAttr(h.orderId)}')">Delete</button>` : ''}</div>
     </div>
   `).join('');
 }
@@ -1952,6 +1968,7 @@ async function checkNdrNow(){
     const data = await jsonpRequest('checkNdr', {}, 60000);
     if(!data.success){ showToast(data.error || 'Could not check NDR'); return; }
     showToast(data.ndr.length ? data.ndr.length + ' NDR shipment(s) found' : 'No NDR shipments (' + data.checked + ' checked)');
+    ndrOnlyView = true;
     await loadSharedHistory();
   }catch(err){
     showToast('Could not check NDR: ' + err.message);
@@ -1968,6 +1985,54 @@ async function refreshNdrOnStartup(){
 }
 updateNdrBanner();
 refreshNdrOnStartup();
+
+// ---- Delete order ----
+let deleteTargetId = null;
+// Delete is offered only while a shipment can still be cancelled at Delhivery
+// (not yet picked up). Failed bookings with no AWB can always be removed.
+function canDeleteOrder(h){
+  if(!h.success || !h.waybill) return true;
+  const live = String(h.liveStatus || '');
+  return !live || /manifest|not picked|pending pickup|pickup (pending|scheduled|requested)|awaiting pickup/i.test(live);
+}
+function openDeleteOrder(orderId){
+  const h = getHistory().find(x => x.orderId === orderId);
+  if(!h) return;
+  deleteTargetId = orderId;
+  const hasAwb = !!(h.success && h.waybill);
+  document.getElementById('deleteInfo').textContent = h.consigneeName + ' · ' + h.orderId + (hasAwb ? ' · AWB ' + h.waybill : '');
+  const btn = document.getElementById('deleteCancelBtn');
+  btn.textContent = hasAwb ? 'Cancel at Delhivery & delete' : 'Delete';
+  document.getElementById('deleteHint').textContent = hasAwb
+    ? 'The AWB is cancelled at Delhivery first. If Delhivery refuses (for example the shipment is already picked up), nothing is deleted.'
+    : 'This booking has no AWB, so there is nothing to cancel at Delhivery.';
+  document.getElementById('deleteOverlay').classList.add('show');
+}
+function closeDeleteOrder(){
+  document.getElementById('deleteOverlay').classList.remove('show');
+  deleteTargetId = null;
+}
+async function confirmDeleteOrder(){
+  const orderId = deleteTargetId;
+  const h = getHistory().find(x => x.orderId === orderId);
+  if(!h) return closeDeleteOrder();
+  const cancelAtDelhivery = !!(h.success && h.waybill);
+  closeDeleteOrder();
+  showToast(cancelAtDelhivery ? 'Cancelling at Delhivery…' : 'Removing…');
+  try{
+    const data = await jsonpRequest('deleteOrder', { orderId: orderId, waybill: h.waybill || '', cancelAtDelhivery: !!cancelAtDelhivery }, 30000);
+    if(!data.success){
+      showToast(data.error || 'Could not delete');
+      return;
+    }
+    saveHistory(getHistory().filter(x => x.orderId !== orderId));
+    updateNdrBanner();
+    renderHistory();
+    showToast(data.cancelled ? 'Shipment cancelled and removed' : 'Removed from history');
+  }catch(err){
+    showToast('Could not delete: ' + err.message);
+  }
+}
 </script>
 
 </body>
